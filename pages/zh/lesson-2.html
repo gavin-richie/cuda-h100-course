@@ -1,0 +1,511 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+      name="description"
+      content="CUDA Programming for NVIDIA H100s 第 2 课：线程块集群、分布式共享内存、内联 PTX、状态空间、数据类型与指针转换。"
+    >
+    <meta name="theme-color" content="#08111d">
+    <title>第 2 课 - 集群、数据类型、内联 PTX 与指针 | CUDA Programming for NVIDIA H100s</title>
+    <link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&family=Urbanist:wght@500;600;700;800&display=swap"
+      rel="stylesheet"
+    >
+    <link rel="stylesheet" href="../../styles.css">
+  </head>
+  <body class="lesson-view lesson-view-clusters">
+    <header class="site-header">
+      <a class="header-mark" href="../../index.html#top" aria-label="CUDA Programming for NVIDIA H100s">
+        <span>Prateek Shukla</span>
+        <span>CUDA Programming for NVIDIA H100s</span>
+      </a>
+      <button
+        class="nav-toggle"
+        type="button"
+        aria-expanded="false"
+        aria-controls="site-nav"
+        aria-label="打开导航"
+      >
+        <span class="nav-toggle-label">菜单</span>
+        <span class="nav-toggle-icon" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
+        </span>
+      </button>
+      <nav class="site-nav" id="site-nav" aria-label="课程导航">
+        <a href="#overview">概览</a>
+        <a href="#clusters">集群</a>
+        <a href="#ptx">PTX</a>
+        <a href="#memory">内存</a>
+        <a href="#pointers">指针</a>
+        <a href="../../index.html#explore">探索</a>
+        <a class="lang-switch" href="../lesson-2.html" lang="en" hreflang="en" aria-label="Switch to English version">English</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="lesson-hero">
+        <div class="section-shell lesson-hero-grid">
+          <div class="lesson-hero-copy">
+            <p class="hero-credit">课程导览 / 第 02 课</p>
+            <h1 class="lesson-hero-title">集群、数据类型、内联 PTX 与指针</h1>
+            <p class="lesson-hero-summary">
+              第 2 课从架构进入机制。焦点转向集群驻留（cluster residency）、分布式共享内存、PTX 状态空间（state space）、内联 PTX 约束、打包数据类型，以及当内存搬运不再是泛型（generic）时 Hopper 代码所依赖的地址转换。
+            </p>
+            <div class="lesson-chip-list" aria-label="第 2 课主题">
+              <span class="lesson-chip">线程块集群</span>
+              <span class="lesson-chip">DSMEM</span>
+              <span class="lesson-chip">内联 PTX</span>
+              <span class="lesson-chip">状态空间</span>
+              <span class="lesson-chip">cvta / mapa</span>
+            </div>
+            <div class="hero-actions">
+              <a
+                class="button button-primary"
+                href="../../H100-Course/slides/2. Clusters, Data types, inline PTX, State Spaces.pdf"
+                target="_blank"
+                rel="noreferrer"
+              >
+                打开幻灯片
+              </a>
+              <a class="button button-secondary" href="../../index.html#explore">返回探索</a>
+            </div>
+          </div>
+
+          <aside class="lesson-meta-card" data-reveal>
+            <p class="lesson-meta-eyebrow">本课改变之处</p>
+            <h2>高性能 Hopper 代码不再是泛型的指针算术。</h2>
+            <p>
+              本课是这门课开始明确带上 Hopper 专属色彩的地方：集群级协作、远程共享内存访问、通过 PTX 的指令级控制，以及把抽象 CUDA 指针映射到具体地址空间所需的转换步骤。
+            </p>
+            <dl class="lesson-facts">
+              <div>
+                <dt>课程位置</dt>
+                <dd>第 02 课，共 10 课</dd>
+              </div>
+              <div>
+                <dt>核心转变</dt>
+                <dd>内存放置与指令形式成为显式的优化面。</dd>
+              </div>
+              <div>
+                <dt>配套幻灯片</dt>
+                <dd><code>2. Clusters, Data types, inline PTX, State Spaces.pdf</code></dd>
+              </div>
+              <div>
+                <dt>代码锚点</dt>
+                <dd><code>fast.cu/examples/matmul/matmul_12.cuh</code></dd>
+              </div>
+            </dl>
+          </aside>
+        </div>
+      </section>
+
+      <section class="lesson-body">
+        <div class="section-shell lesson-layout">
+          <aside class="lesson-sidebar">
+            <div class="lesson-sidebar-card">
+              <p class="section-kicker">本页内容</p>
+              <nav class="lesson-side-nav" aria-label="第 2 课小节">
+                <a href="#overview">概览</a>
+                <a href="#clusters">线程块集群</a>
+                <a href="#dsmem">分布式共享内存</a>
+                <a href="#ptx">PTX 与操作数</a>
+                <a href="#memory">寻址与 bank</a>
+                <a href="#pointers">指针、<code>cvta</code> 与 <code>mapa</code></a>
+                <a href="#takeaways">整合要点</a>
+                <a href="#continue">继续学习本课程</a>
+              </nav>
+            </div>
+
+            <div class="lesson-sidebar-card">
+              <p class="section-kicker">关键要点</p>
+              <ul class="lesson-mini-list">
+                <li>集群在不把单个 CTA 拆到多个 SM 上的前提下扩大协作范围。</li>
+                <li>当操作数类型、状态空间或同步语义需要精确控制时，内联 PTX 就很重要。</li>
+                <li><code>cvta</code> 和 <code>mapa</code> 是从泛型指针通往 Hopper 专属内存行为的桥梁。</li>
+              </ul>
+            </div>
+
+            <div class="lesson-sidebar-card">
+              <p class="section-kicker">配套链接</p>
+              <a class="lesson-text-link" href="lesson-1.html">返回第 1 课</a>
+              <a class="lesson-text-link" href="lesson-3.html">打开第 3 课</a>
+              <a class="lesson-text-link" href="../../slides.html">浏览全部幻灯片</a>
+              <a class="lesson-text-link" href="../../index.html#code">跳转到代码锚点</a>
+            </div>
+          </aside>
+
+          <article class="lesson-article">
+            <section class="lesson-chapter" id="overview" data-reveal>
+              <h2>概览</h2>
+              <p>
+                现代 CUDA 性能工作常常要求同时思考调度、内存拓扑、编译器行为和指令级控制。第 2 课正是这些层开始折叠成一幅统一图景的地方。线程块集群（thread block cluster）改变块之间协作的方式。分布式共享内存改变了哪些数据可以在不绕道全局内存的情况下共享。PTX 与内联 PTX 暴露出 CUDA C++ 并不总是直接呈现的指令形式。指针转换指令把这一切接回真实的硬件地址空间。
+              </p>
+              <div class="lesson-note">
+                <p>
+                  <strong>核心思想：</strong>高性能 GPU 代码不只是少做工作。它还关乎把数据放进正确的内存区域、使用正确的指令形式，并尽量减少不必要的路由、同步和 bank 冲突。
+                </p>
+              </div>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3>集群</h3>
+                  <p>被保证共同调度在邻近 SM 上的 CTA，在块层级之上创造出一个新的协作面。</p>
+                </article>
+                <article class="lesson-card">
+                  <h3>DSMEM</h3>
+                  <p>集群内部的远程共享内存访问，减少了块回退到全局内存的频率。</p>
+                </article>
+                <article class="lesson-card">
+                  <h3>内联 PTX</h3>
+                  <p>当精确的状态空间、数据类型或同步形式正是关键所在时，指令级控制就很重要。</p>
+                </article>
+                <article class="lesson-card">
+                  <h3>指针转换</h3>
+                  <p><code>cvta</code> 和 <code>mapa</code> 把高层指针接到具体的内存与集群语义上。</p>
+                </article>
+              </div>
+            </section>
+
+            <section class="lesson-chapter" id="clusters" data-reveal>
+              <h2>线程块集群</h2>
+              <p>
+                线程块集群是一组被保证共同并发调度在同一个 GPC 内相邻 SM 上的线程块。重点在于，它把层级从<strong>线程 -&gt; 线程块 -&gt; 集群 -&gt; grid</strong>扩展了一层，而不是假装一个块现在被摊到了多个 SM 上。
+              </p>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3>集群为什么重要</h3>
+                  <p>
+                    当单个线程块无法在单个 SM 上容纳足够多的有用共享状态时，集群为邻近的 CTA 提供了更直接协作的方式。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>什么没有改变</h3>
+                  <p>
+                    一个 CTA 仍然恰好在一个 SM 上执行。集群协调的是整个块；它们不会把一个 CTA 拆散到整台机器上。
+                  </p>
+                </article>
+              </div>
+              <h3>关键性质</h3>
+              <ul>
+                <li>集群是显式的软件构造，不是调度器自动产生的副作用。</li>
+                <li>集群中的所有 CTA 被保证同时驻留在邻近的 SM 上。</li>
+                <li>当跨块数据共享频繁到让全局内存代价过高时，它们就有用。</li>
+                <li>它们用一些协调开销换取更大的有效工作集。</li>
+              </ul>
+              <h3>集群尺寸的权衡</h3>
+              <table class="lesson-table" aria-label="集群尺寸的权衡">
+                <thead>
+                  <tr>
+                    <th>集群大小</th>
+                    <th>好处</th>
+                    <th>代价</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>2</td>
+                    <td>协调开销低，通常是实用的默认选择。</td>
+                    <td>集群内共享内存的覆盖范围有限。</td>
+                  </tr>
+                  <tr>
+                    <td>8</td>
+                    <td>更多协作 CTA，在规模与可用性之间有实用的平衡。</td>
+                    <td>更高的同步成本，对 grid 形状有更多约束。</td>
+                  </tr>
+                  <tr>
+                    <td>16</td>
+                    <td>课程讲义中描述的最大邻域。</td>
+                    <td>最高的同步开销，硬件闲置的风险更大。</td>
+                  </tr>
+                </tbody>
+              </table>
+              <h3>声明集群</h3>
+              <pre class="lesson-pre"><code>__global__ void __cluster_dims__(2, 1, 1)
+cluster_kernel(float* input, float* output) {
+  // kernel body
+}
+
+// launch shape must remain compatible with cluster dimensions</code></pre>
+              <h3>集群特殊寄存器</h3>
+              <table class="lesson-table" aria-label="集群特殊寄存器">
+                <thead>
+                  <tr>
+                    <th>寄存器</th>
+                    <th>含义</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code>%cluster_ctaid</code></td>
+                    <td>集群内的 CTA 标识符。</td>
+                  </tr>
+                  <tr>
+                    <td><code>%cluster_nctaid</code></td>
+                    <td>集群的维度。</td>
+                  </tr>
+                  <tr>
+                    <td><code>%cluster_ctarank</code></td>
+                    <td>CTA 在集群内的线性化 rank。</td>
+                  </tr>
+                  <tr>
+                    <td><code>%cluster_nctarank</code></td>
+                    <td>集群内的 CTA 总数。</td>
+                  </tr>
+                  <tr>
+                    <td><code>%is_explicit_cluster</code></td>
+                    <td>启动时使用的是显式集群，而不是隐式的 <code>1x1x1</code> 情形。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </section>
+
+            <section class="lesson-chapter" id="dsmem" data-reveal>
+              <h2>分布式共享内存</h2>
+              <p>
+                分布式共享内存是共享内存的集群时代扩展。它允许同一线程块集群内的 SM 之间直接访问内存。所有权仍然按块划分，但程序员可以寻址邻近 CTA 的共享内存分配，而不必把所有东西都经由全局内存路由。
+              </p>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3>它能实现什么</h3>
+                  <p>同一集群内 CTA 之间的远程共享内存加载、存储和原子操作。</p>
+                </article>
+                <article class="lesson-card">
+                  <h3>它为什么快</h3>
+                  <p>它使用 SM 到 SM 的通信路径，而不是强迫所有通信都经过 L2 和 HBM。</p>
+                </article>
+                <article class="lesson-card">
+                  <h3>它不是什么</h3>
+                  <p>它不是一个合并成一体的共享内存池。每个 CTA 仍然拥有自己的本地分配。</p>
+                </article>
+              </div>
+              <p>
+                实际的收益是一个比全局内存便宜得多的内存层级上的更大有效工作集。这对 top-k、矩阵流水线、归约（reduction）或 tile 交换模式尤其有用——在这些场景中，邻近 CTA 需要彼此的中间状态。
+              </p>
+              <div class="lesson-note">
+                <p>
+                  <strong>TMA 与多播：</strong>当 DSMEM 与 TMA 支撑的搬运和多播（multicast）配合时，它的威力大得多。一个生产者可以喂饱多个消费者，而不必为每个目的地重复完整的数据搬运路径。
+                </p>
+              </div>
+            </section>
+
+            <section class="lesson-chapter" id="ptx" data-reveal>
+              <h2>PTX、内联 PTX、操作数与状态空间</h2>
+              <p>
+                PTX 是 CUDA 工具链内部的 NVIDIA 虚拟 ISA。CUDA C++ 先被转换为 PTX，PTX 再被进一步转换为机器专属代码。当你想要指令级控制、又不想用 PTX 重写整个 kernel 时，内联 PTX 就很重要。
+              </p>
+              <h3>为什么要用内联 PTX</h3>
+              <ul>
+                <li>为了访问 CUDA C++ 没有干净暴露的硬件特性。</li>
+                <li>为了手工优化小的性能关键片段。</li>
+                <li>为了请求精确的操作数类型、状态空间或同步形式。</li>
+                <li>为了通过模板注入常量或指令参数。</li>
+              </ul>
+              <pre class="lesson-pre"><code>asm volatile(
+  "ptx instruction here;"
+  : /* outputs */
+  : /* inputs */
+  : /* clobbers */
+);</code></pre>
+              <h3>约束修饰符与常见操作数类别</h3>
+              <table class="lesson-table" aria-label="内联 PTX 约束">
+                <thead>
+                  <tr>
+                    <th>约束</th>
+                    <th>含义</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code>=</code></td>
+                    <td>只写输出操作数。</td>
+                  </tr>
+                  <tr>
+                    <td><code>+</code></td>
+                    <td>读写操作数。</td>
+                  </tr>
+                  <tr>
+                    <td><code>r</code></td>
+                    <td>通用整数寄存器。</td>
+                  </tr>
+                  <tr>
+                    <td><code>l</code></td>
+                    <td>64 位整数寄存器，常用于地址。</td>
+                  </tr>
+                  <tr>
+                    <td><code>f</code></td>
+                    <td>32 位浮点寄存器。</td>
+                  </tr>
+                  <tr>
+                    <td><code>d</code></td>
+                    <td>64 位浮点寄存器。</td>
+                  </tr>
+                </tbody>
+              </table>
+              <p>
+                当汇编以编译器无法仅凭操作数列表推断的方式改变内存时，通常需要 <code>memory</code> clobber。没有它，编译器可以合法地重排周围的代码，从而破坏预期的语义。
+              </p>
+              <h3>PTX 状态空间</h3>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3><code>.global</code></h3>
+                  <p>对整个 grid 可见的大容量设备内存，容量大、延迟高。</p>
+                </article>
+                <article class="lesson-card">
+                  <h3><code>.shared</code></h3>
+                  <p>CTA 本地的低延迟内存，或在 DSMEM 工作流中可通过集群机制到达。</p>
+                </article>
+                <article class="lesson-card">
+                  <h3><code>.local</code></h3>
+                  <p>每线程存储，通常是寄存器溢出（spill）时由内存支撑的存储。</p>
+                </article>
+                <article class="lesson-card">
+                  <h3><code>.const</code> / <code>.param</code></h3>
+                  <p>只读常量空间和 kernel 参数空间，各有自己的访问语义。</p>
+                </article>
+              </div>
+              <h3>Hopper 代码中出现的数据类型</h3>
+              <ul>
+                <li>标准整数与浮点标量（scalar）家族对控制流和寻址仍然重要。</li>
+                <li>BF16、FP16、TF32 和 FP8 很重要，因为它们改变吞吐量、打包密度和张量核心（tensor core）的发射形态。</li>
+                <li>打包类型很重要，因为多个低精度值常常被装进同一个 32 位寄存器。</li>
+              </ul>
+            </section>
+
+            <section class="lesson-chapter" id="memory" data-reveal>
+              <h2>寻址、bank 与 swizzle</h2>
+              <p>
+                共享内存仍然是分 bank 的，即使在 Hopper 上 bank 结构也依然重要。糟糕的访问模式能把本可并行的流量串行化，这就是为什么低级布局选择继续是性能工程的一部分，而不是无关紧要的细节。
+              </p>
+              <h3>共享内存 bank</h3>
+              <ul>
+                <li>理想情况下，warp 中的线程把请求分散到各个 bank 上，而不是堆到同一个 bank。</li>
+                <li>bank 冲突增加重放（replay）并降低有效带宽。</li>
+                <li>访问模式越有结构，冲突行为就越容易推理。</li>
+              </ul>
+              <h3>128 字节事务粒度</h3>
+              <p>
+                许多高性能路径以 128 字节块为单位推理，因为它与高效搬运和布局变换的粒度对得很好。这也是 tile 形状和 swizzle 在 Hopper 代码中如此常见的原因之一。
+              </p>
+              <div class="lesson-note">
+                <p>
+                  <strong>swizzle 为什么存在：</strong>它是一种布局技巧，用于把访问更均匀地摊到各个 bank 和事务上，这样即使张量 tile 很大且被大量复用，结构化的搬运也能保持快速。
+                </p>
+              </div>
+            </section>
+
+            <section class="lesson-chapter" id="pointers" data-reveal>
+              <h2>泛型指针、状态空间指针、<code>cvta</code> 与 <code>mapa</code></h2>
+              <p>
+                CUDA C++ 通常给你泛型指针，但 PTX 指令常常需要一个已经在正确状态空间下被理解的指针。这就是转换步骤重要的原因。在低级汇编中，编译器无法总是假设泛型指针应该指向哪个物理内存区域。
+              </p>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3>泛型指针</h3>
+                  <p>在 CUDA C++ 层面很灵活，但对关心特定状态空间的指令来说是含糊的。</p>
+                </article>
+                <article class="lesson-card">
+                  <h3>状态空间指针</h3>
+                  <p>显式标识 shared、global、local 或 constant 语义，让指令可以瞄准正确的路径。</p>
+                </article>
+              </div>
+              <h3><code>cvta</code> 与 <code>mapa</code></h3>
+              <pre class="lesson-pre"><code>// Convert a generic pointer into a specific address space
+asm volatile("cvta.to.shared.u64 %0, %1;" : "=l"(smem_addr) : "l"(ptr));
+
+// Map a shared-memory address into another CTA's shared-memory region
+asm volatile("mapa.shared::cluster.u64 %0, %1, %2;" : "=l"(remote_addr) : "l"(addr), "r"(rank));</code></pre>
+              <p>
+                <code>cvta</code> 把泛型地址转换成恰当的状态空间地址。<code>mapa</code> 在此基础上为集群编程更进一步：把一个共享内存地址映射到集群内另一个 CTA 的地址空间。
+              </p>
+              <div class="lesson-note">
+                <p>
+                  <strong>重要区别：</strong>集群内 rank（cluster rank）不等于全局块 ID。块 ID 告诉你一个 CTA 在整个 grid 中的位置。集群内 rank 告诉你它在本地集群中的位置，而映射操作关心的正是这个值。
+                </p>
+              </div>
+            </section>
+
+            <section class="lesson-chapter" id="takeaways" data-reveal>
+              <h2>整合要点</h2>
+              <ol>
+                <li><strong>不要把集群压扁成"更大一号的共享内存"。</strong>驻留保证和所有权仍然重要。</li>
+                <li><strong>保持状态空间术语的精确。</strong><code>.global</code>、<code>.shared</code> 与泛型指针不可互换。</li>
+                <li><strong>把内联 PTX 当作外科手术式的工具。</strong>在精确语义正是关键时使用它，而不是当作风格偏好。</li>
+                <li><strong>尊重 bank 行为和 128 字节布局假设。</strong>swizzle 和打包布局的存在是有原因的。</li>
+                <li><strong>对 rank 和映射要精确。</strong>很多集群 bug 实际上是地址空间或 rank 映射 bug。</li>
+              </ol>
+              <h3>术语表</h3>
+              <table class="lesson-table" aria-label="第 2 课术语表">
+                <tbody>
+                  <tr>
+                    <th>集群（Cluster）</th>
+                    <td>被保证共同调度在 GPC 内邻近 SM 上的一组 CTA。</td>
+                  </tr>
+                  <tr>
+                    <th>DSMEM</th>
+                    <td>分布式共享内存（Distributed shared memory），一个集群内跨 CTA 的远程共享内存访问。</td>
+                  </tr>
+                  <tr>
+                    <th>PTX</th>
+                    <td>NVIDIA 的虚拟 ISA，作为 CUDA 工具链内部更低层级的目标。</td>
+                  </tr>
+                  <tr>
+                    <th><code>cvta</code></th>
+                    <td>Convert to address（转换为地址）；把泛型指针变成正确的状态空间地址。</td>
+                  </tr>
+                  <tr>
+                    <th><code>mapa</code></th>
+                    <td>Map address（映射地址）；在集群内的 CTA 之间重映射共享内存地址。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </section>
+
+            <section class="lesson-chapter" id="continue" data-reveal>
+              <h2>继续学习本课程</h2>
+              <p>
+                第 2 课构建了 Hopper kernel 所需的地址空间与指令级词汇。下一个大步骤是重叠之下的同步：屏障（barrier）、等待模式，以及当加载与计算被有意同时放在途时的正确性。
+              </p>
+              <div class="lesson-resource-grid">
+                <a class="lesson-resource-card" href="lesson-3.html">
+                  <span class="lesson-resource-label">下一课</span>
+                  <h3>异步与屏障</h3>
+                  <p>进入 <code>mbarrier</code>、proxy 栅栏、等待语义与重叠下的正确性。</p>
+                </a>
+                <a class="lesson-resource-card" href="../../slides.html">
+                  <span class="lesson-resource-label">课程材料</span>
+                  <h3>全部幻灯片</h3>
+                  <p>当你想要超出当前整合课程页的完整讲座序列时，使用幻灯片页面。</p>
+                </a>
+                <a class="lesson-resource-card" href="../../index.html#explore">
+                  <span class="lesson-resource-label">探索</span>
+                  <h3>返回课程档案</h3>
+                  <p>回到首页的探索章节，在当前的长文课程条目之间移动。</p>
+                </a>
+              </div>
+            </section>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <nav class="footer-nav" aria-label="页脚">
+        <a href="../../index.html#top">首页</a>
+        <a href="../../index.html#lessons">课程</a>
+        <a href="../../index.html#explore">探索</a>
+        <a href="../../index.html#visuals">可视化</a>
+        <a href="../../slides.html">幻灯片</a>
+      </nav>
+      <p>CUDA Programming for NVIDIA H100s</p>
+      <p>Prateek Shukla</p>
+    </footer>
+
+    <script src="../../script.js"></script>
+  </body>
+</html>

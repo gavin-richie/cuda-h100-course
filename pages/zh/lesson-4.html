@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+      name="description"
+      content="CUDA Programming for NVIDIA H100s 第 4 课：cuTensorMap、Hopper TMA、描述符字段、swizzle、交错、L2 提升与越界填充。"
+    >
+    <meta name="theme-color" content="#08111d">
+    <title>第 4 课 - cuTensorMap | CUDA Programming for NVIDIA H100s</title>
+    <link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&family=Urbanist:wght@500;600;700;800&display=swap"
+      rel="stylesheet"
+    >
+    <link rel="stylesheet" href="../../styles.css">
+  </head>
+  <body class="lesson-view lesson-view-tma">
+    <header class="site-header">
+      <a class="header-mark" href="../../index.html#top" aria-label="CUDA Programming for NVIDIA H100s">
+        <span>Prateek Shukla</span>
+        <span>CUDA Programming for NVIDIA H100s</span>
+      </a>
+      <button
+        class="nav-toggle"
+        type="button"
+        aria-expanded="false"
+        aria-controls="site-nav"
+        aria-label="打开导航"
+      >
+        <span class="nav-toggle-label">菜单</span>
+        <span class="nav-toggle-icon" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
+        </span>
+      </button>
+      <nav class="site-nav" id="site-nav" aria-label="课程导航">
+        <a href="#overview">概览</a>
+        <a href="#descriptor">描述符</a>
+        <a href="#fields">字段</a>
+        <a href="#swizzle">Swizzle</a>
+        <a href="#takeaways">要点</a>
+        <a href="../../index.html#explore">探索</a>
+        <a class="lang-switch" href="../lesson-4.html" lang="en" hreflang="en" aria-label="Switch to English version">English</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="lesson-hero">
+        <div class="section-shell lesson-hero-grid">
+          <div class="lesson-hero-copy">
+            <p class="hero-credit">课程导览 / 第 04 课</p>
+            <h1 class="lesson-hero-title">cuTensorMap</h1>
+            <p class="lesson-hero-summary">
+              第 4 课是描述符（descriptor）一课。Hopper TMA 之所以能真正异步，是因为传输状态
+              被提前编码：基址指针、维度、步长（stride）、元素遍历方式、swizzle、交错（interleave）、L2 抓取
+              策略与越界行为，全部成为一个硬件可以据以执行的可复用对象。
+            </p>
+            <div class="lesson-chip-list" aria-label="第 4 课主题">
+              <span class="lesson-chip">CUtensorMap</span>
+              <span class="lesson-chip">TMA</span>
+              <span class="lesson-chip">Swizzle</span>
+              <span class="lesson-chip">交错</span>
+              <span class="lesson-chip">L2 提升</span>
+            </div>
+            <div class="hero-actions">
+              <a
+                class="button button-primary"
+                href="../../H100-Course/slides/4. cuTensorMap.pdf"
+                target="_blank"
+                rel="noreferrer"
+              >
+                打开幻灯片
+              </a>
+              <a class="button button-secondary" href="../../index.html#explore">返回探索</a>
+            </div>
+          </div>
+
+          <aside class="lesson-meta-card" data-reveal>
+            <p class="lesson-meta-eyebrow">本课改变之处</p>
+            <h2>地址算术不再活在指令流里，而是进入元数据。</h2>
+            <p>
+              本课解释为什么 Hopper TMA 不只是"一种更快的拷贝"。它是一条描述符驱动的搬运路径，
+              其性能与正确性取决于在异步操作开始之前就把张量结构、布局（layout）策略与抓取行为
+              编码好。
+            </p>
+            <dl class="lesson-facts">
+              <div>
+                <dt>课程位置</dt>
+                <dd>第 04 课，共 10 课</dd>
+              </div>
+              <div>
+                <dt>核心转变</dt>
+                <dd>搬运成为拥有一份显式契约的一等对象。</dd>
+              </div>
+              <div>
+                <dt>配套幻灯片</dt>
+                <dd><code>4. cuTensorMap.pdf</code></dd>
+              </div>
+              <div>
+                <dt>代码锚点</dt>
+                <dd><code>fast.cu/examples/matmul/matmul_12.cuh</code></dd>
+              </div>
+            </dl>
+          </aside>
+        </div>
+      </section>
+
+      <section class="lesson-body">
+        <div class="section-shell lesson-layout">
+          <aside class="lesson-sidebar">
+            <div class="lesson-sidebar-card">
+              <p class="section-kicker">本页内容</p>
+              <nav class="lesson-side-nav" aria-label="第 4 课小节">
+                <a href="#overview">TMA 改变了什么</a>
+                <a href="#descriptor">描述符包含什么</a>
+                <a href="#fields">逐字段规则</a>
+                <a href="#swizzle">swizzle 与交错</a>
+                <a href="#l2">L2 提升与越界填充</a>
+                <a href="#takeaways">实践指导</a>
+                <a href="#continue">继续学习本课程</a>
+              </nav>
+            </div>
+
+            <div class="lesson-sidebar-card">
+              <p class="section-kicker">关键要点</p>
+              <ul class="lesson-mini-list">
+                <li>描述符让 Hopper 得以只发起一次异步传输，然后把剩下的交给硬件完成。</li>
+                <li>维度、元素步长、字节步长与 box 维度不是可以互换的单位。</li>
+                <li>swizzle、交错、L2 提升（L2 promotion）与 OOB 填充是性能与正确性的旋钮，不是装饰。</li>
+              </ul>
+            </div>
+
+            <div class="lesson-sidebar-card">
+              <p class="section-kicker">配套链接</p>
+              <a class="lesson-text-link" href="lesson-3.html">返回第 3 课</a>
+              <a class="lesson-text-link" href="lesson-5.html">打开第 5 课</a>
+              <a class="lesson-text-link" href="../../files/fast.cu/examples/matmul/matmul_12.cuh" target="_blank" rel="noreferrer">打开描述符代码锚点</a>
+              <a class="lesson-text-link" href="../../slides.html">浏览全部幻灯片</a>
+            </div>
+          </aside>
+
+          <article class="lesson-article">
+            <section class="lesson-chapter" id="overview" data-reveal>
+              <h2>TMA 改变了什么</h2>
+              <p>
+                TMA 是 Hopper 在全局内存（global memory）与共享内存之间进行大规模异步张量拷贝的硬件
+                路径。Hopper 不再把搬运与每线程地址生成绑在一起，而是让一个发起线程描述这次传输，
+                然后继续执行，由硬件在后台处理该操作。
+              </p>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3>描述符驱动搬运之前</h3>
+                  <p>
+                    线程大量参与地址生成，拷贝碎片化成更小的片段，SM 仍然被拴在搬运的机械细节上。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>有了 Hopper TMA 之后</h3>
+                  <p>
+                    一条指令加一个描述符就能描述整个 tile 传输，而搬运路径基本由硬件自行处理。
+                  </p>
+                </article>
+              </div>
+              <p>
+                这就是本课不断回到描述符的原因。Hopper 的异步机器之所以能运转，是因为
+                布局知识被提前编码，而不是每次都由发起线程重新计算。
+              </p>
+              <div class="lesson-note">
+                <p>
+                  <strong>核心思想：</strong> <code>CUtensorMap</code> 把传输状态从指令流中移出，
+                  放进一个可复用的 128 字节元数据对象中，TMA 硬件可以据以执行。
+                </p>
+              </div>
+            </section>
+
+            <section class="lesson-chapter" id="descriptor" data-reveal>
+              <h2>描述符包含什么</h2>
+              <p>
+                一个 <code>CUtensorMap</code> 在 host 上创建，用 CUDA Driver API 编码，然后由
+                发出 TMA 指令的运行时路径使用。概念上它回答三个问题：张量住在哪里、它如何布局，
+                以及硬件应该如何搬运它。
+              </p>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3>寻址元数据</h3>
+                  <p>基址指针、rank、全局维度与字节步长定义了内存中的源张量。</p>
+                </article>
+                <article class="lesson-card">
+                  <h3>遍历元数据</h3>
+                  <p>box 维度与元素步长定义 tile 大小与每个维度的移动行为。</p>
+                </article>
+                <article class="lesson-card">
+                  <h3>布局与策略元数据</h3>
+                  <p>数据类型、swizzle、交错、L2 提升与 OOB 填充塑造传输的行为方式。</p>
+                </article>
+              </div>
+              <h3>编码工作流</h3>
+              <ol>
+                <li>在 host 内存中创建一个 <code>CUtensorMap</code> 对象。</li>
+                <li>用 CUDA Driver API 对它编码，通常使用 <code>cuTensorMapEncodeTiled(...)</code>。</li>
+                <li>把编码好的描述符传给将发起 TMA 搬运的路径。</li>
+              </ol>
+              <pre class="lesson-pre"><code>CUtensorMap tma_desc;
+// host-side descriptor object, 128 bytes, 128B aligned
+
+// encode with CUDA Driver API
+// cuTensorMapEncodeTiled(&amp;tma_desc, ...);</code></pre>
+            </section>
+
+            <section class="lesson-chapter" id="fields" data-reveal>
+              <h2>逐字段的关键规则</h2>
+              <p>
+                破坏一个 tensor map 最简单的方式就是混淆单位与不变量。课程材料非常明确：
+                有些字段以元素为单位，有些以字节为单位，还有些带有取决于数据类型或交错模式的
+                对齐约束。
+              </p>
+              <table class="lesson-table" aria-label="cuTensorMap 字段指南">
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>含义</th>
+                    <th>单位 / 约束</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>数据类型</td>
+                    <td>定义源张量如何被解释，以及适用哪些对齐 / 大小规则。</td>
+                    <td>类型枚举，如 FP16、BF16、FP32、TF32、整数。</td>
+                  </tr>
+                  <tr>
+                    <td>rank</td>
+                    <td>张量维度的数量，不是矩阵的秩。</td>
+                    <td>笔记将支持的搬运范围界定为 1D 到 5D 张量拷贝。</td>
+                  </tr>
+                  <tr>
+                    <td>全局地址</td>
+                    <td>HBM 中的基址设备指针。</td>
+                    <td>基线要求 16B 对齐，启用交错时更严格。</td>
+                  </tr>
+                  <tr>
+                    <td><code>globalDim</code></td>
+                    <td>每个张量维度的大小。</td>
+                    <td>以元素为单位。</td>
+                  </tr>
+                  <tr>
+                    <td><code>globalStrides</code></td>
+                    <td>在源内存中跨更高维度移动的距离。</td>
+                    <td>以字节为单位。</td>
+                  </tr>
+                  <tr>
+                    <td><code>elementStrides</code></td>
+                    <td>异步拷贝期间遍历的逻辑步长。</td>
+                    <td>以元素为单位，数组大小等于 rank。</td>
+                  </tr>
+                  <tr>
+                    <td><code>boxDim</code></td>
+                    <td>一次 TMA 传输的 tile 大小。</td>
+                    <td>以元素为单位，必须符合下游布局假设。</td>
+                  </tr>
+                </tbody>
+              </table>
+              <div class="lesson-note">
+                <p>
+                  <strong>注意区分：</strong>全局维度与 box 维度以元素为单位，而
+                  全局步长以字节为单位。丢掉这个区别是编码出错误描述符的最快方式之一。
+                </p>
+              </div>
+              <h3>数据类型与 rank</h3>
+              <p>
+                笔记列出了常见类型，包括无符号整数、有符号整数、FP16、BF16、FP32、FP64 与
+                TensorFloat-32 变体。这里的 rank 指张量维度数，不是线性代数中的矩阵秩。
+              </p>
+              <h3>对齐与交错约束</h3>
+              <p>
+                交错模式会收紧地址与步长规则。笔记明确指出：16B 交错要求 16 字节对齐，32B
+                交错要求 32 字节对齐，步长粒度要与之匹配，并且使用交错时维度数至少为 3。
+              </p>
+            </section>
+
+            <section class="lesson-chapter" id="swizzle" data-reveal>
+              <h2>swizzle 与交错是布局变得硬件友好的方式</h2>
+              <p>
+                swizzle 是共享内存一侧的布局变换。交错是全局内存中源布局的解码。
+                两者相关，因为 Hopper 常常必须先解码打包的源布局，再把结果放进下游消费者
+                （consumer）能够高效读取的共享内存（shared memory）排布中。
+              </p>
+              <h3>swizzle 为什么存在</h3>
+              <p>
+                共享内存有 32 个 bank。常规的 strided 布局可能反复命中相同的 bank，把本应并行的访问
+                串行化。Hopper 在传输过程中使用硬件加速的地址置换，使共享内存中的物理放置
+                更好地匹配消费 warp 的访问模式。
+              </p>
+              <table class="lesson-table" aria-label="Swizzle 模式概览">
+                <thead>
+                  <tr>
+                    <th>模式</th>
+                    <th>改变什么</th>
+                    <th>典型用途</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>32B</td>
+                    <td>最小的 swizzle 跨度，缓存行利用率更低，tile 更窄。</td>
+                    <td>非常小的内层维度。</td>
+                  </tr>
+                  <tr>
+                    <td>64B</td>
+                    <td>比 32B 更好的 bank 分散度，但仍不是最强的布局保护。</td>
+                    <td>中等宽度的 tile。</td>
+                  </tr>
+                  <tr>
+                    <td>128B</td>
+                    <td>最大的常见 swizzle 跨度，与主流的共享内存 / 张量消费模式对齐。</td>
+                    <td>常见的 FP16 / BF16 张量核心流水线（pipeline）。</td>
+                  </tr>
+                </tbody>
+              </table>
+              <p>
+                笔记还区分了 atom 大小与跨度（span）。atom 是 swizzler 移动的不可分割块。
+                跨度是 swizzle 模式的重复窗口。这就是笔记强调 bounding-box
+                约束的原因：如果内层维度以字节计超过 swizzle 跨度，模式就会重复，可能
+                重新制造 bank 冲突。
+              </p>
+              <h3>交错耦合</h3>
+              <p>
+                有些源布局在物理上是交错的，例如 NC/8HWC8 或 NC/16HWC16 风格的打包（packing）。交错模式告诉 TMA 如何解码这些块。课程笔记明确指出：32B
+                交错必须与 32B swizzle 配对，因为这两条硬件路径同步联动运行。
+              </p>
+            </section>
+
+            <section class="lesson-chapter" id="l2" data-reveal>
+              <h2>L2 提升与越界填充补全搬运契约</h2>
+              <p>
+                描述符并不止步于布局。它还控制系统向 L2 抓取的激进程度，以及当 tile
+                超出有效张量边界时目的地应收到什么值。
+              </p>
+              <h3>L2 提升</h3>
+              <table class="lesson-table" aria-label="L2 提升指南">
+                <thead>
+                  <tr>
+                    <th>模式</th>
+                    <th>含义</th>
+                    <th>最适合</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>NONE</td>
+                    <td>使用默认的较小抓取行为。</td>
+                    <td>稀疏（sparse）或不规则访问，过度抓取会浪费带宽的场景。</td>
+                  </tr>
+                  <tr>
+                    <td>L2_64B</td>
+                    <td>提升到 64B 抓取宽度。</td>
+                    <td>连续宽度较窄、密度中等的场景。</td>
+                  </tr>
+                  <tr>
+                    <td>L2_128B</td>
+                    <td>一次抓取完整缓存行。</td>
+                    <td>常见的稠密 GEMM 或卷积类流水线。</td>
+                  </tr>
+                  <tr>
+                    <td>L2_256B</td>
+                    <td>逻辑上把两条完整缓存行一起抓取。</td>
+                    <td>复用即时、局部性足以证明值得占用缓存空间的高密度工作负载。</td>
+                  </tr>
+                </tbody>
+              </table>
+              <p>
+                本课的经验法则很简单：稠密 GEMM 与卷积通常受益于 128B 或 256B
+                提升，而稀疏查找通常不做提升更好，以避免抓取永远不会被触碰的邻居数据。
+              </p>
+              <h3>越界填充</h3>
+              <p>
+                边缘 tile 仍然需要搬运。OOB 填充让传输无需手动逐元素防护即可继续：
+                为越界位置合成目的地的值，同时保持 HBM 中的源张量
+                不变。
+              </p>
+              <ul>
+                <li>零填充对 padding 与干净的边界计算很有用。</li>
+                <li>与 NaN 相关的填充模式对调试或特殊行为很有用。</li>
+                <li>这简化了那些天然会延伸到张量边界之外的 tiled kernel。</li>
+              </ul>
+            </section>
+
+            <section class="lesson-chapter" id="takeaways" data-reveal>
+              <h2>实践指导</h2>
+              <ol>
+                <li><strong>先把描述符的数学搞对。</strong> rank、维度与字节步长必须描述真实的张量。</li>
+                <li><strong>遵守对齐规则。</strong> 交错模式与数据类型会改变硬件的预期。</li>
+                <li><strong>围绕消费者选择 tile 几何。</strong> TMA 应该喂养你下游真正使用的计算模式。</li>
+                <li><strong>有意识地使用 swizzle。</strong> 只有当它匹配读取者的访问模式时才有帮助。</li>
+                <li><strong>让 L2 提升匹配连续宽度。</strong> 稠密可预测的流量与稀疏查找需要非常不同的抓取行为。</li>
+              </ol>
+              <h3>术语表</h3>
+              <table class="lesson-table" aria-label="第 4 课术语表">
+                <tbody>
+                  <tr>
+                    <th>TMA</th>
+                    <td>张量内存加速器（Tensor Memory Accelerator），Hopper 的异步张量拷贝引擎。</td>
+                  </tr>
+                  <tr>
+                    <th><code>CUtensorMap</code></th>
+                    <td>由 host 编码的描述符，教会 TMA 如何解释并搬运一个张量 tile。</td>
+                  </tr>
+                  <tr>
+                    <th>Swizzle</th>
+                    <td>共享内存地址重映射，用于减少 bank 冲突并与消费者访问模式对齐。</td>
+                  </tr>
+                  <tr>
+                    <th>交错（Interleave）</th>
+                    <td>针对打包全局内存格式的源布局解码。</td>
+                  </tr>
+                  <tr>
+                    <th>L2 提升</th>
+                    <td>一种抓取宽度提示，在带宽效率与可能的缓存污染之间做权衡。</td>
+                  </tr>
+                  <tr>
+                    <th>OOB 填充</th>
+                    <td>当 TMA tile 超出有效张量边界时使用的目的地填充策略。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </section>
+
+            <section class="lesson-chapter" id="continue" data-reveal>
+              <h2>继续学习本课程</h2>
+              <p>
+                第 4 课给了 TMA 描述符与布局词汇。下一课 <code>cp.async.bulk</code>
+                进入直接使用这套机制进行结构化批量搬运、分组、多播（multicast）与屏障（barrier）关联完成的指令家族。
+              </p>
+              <div class="lesson-resource-grid">
+                <a class="lesson-resource-card" href="lesson-5.html">
+                  <span class="lesson-resource-label">下一课</span>
+                  <h3><code>cp.async.bulk</code></h3>
+                  <p>继续学习 bulk 异步拷贝指令、分组、组播（multicast）与屏障关联完成的语义。</p>
+                </a>
+                <a class="lesson-resource-card" href="../../files/fast.cu/examples/matmul/matmul_12.cuh" target="_blank" rel="noreferrer">
+                  <span class="lesson-resource-label">代码锚点</span>
+                  <h3>matmul_12.cuh</h3>
+                  <p>在真实的 kernel 路径中查看描述符创建与 Hopper 时代的 tensor 搬运假设。</p>
+                </a>
+                <a class="lesson-resource-card" href="../../index.html#explore">
+                  <span class="lesson-resource-label">探索</span>
+                  <h3>返回课程档案</h3>
+                  <p>返回主页的探索区，浏览站内已有的集成课程页面。</p>
+                </a>
+              </div>
+            </section>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <nav class="footer-nav" aria-label="页脚导航">
+        <a href="../../index.html#top">首页</a>
+        <a href="../../index.html#lessons">课程</a>
+        <a href="../../index.html#explore">探索</a>
+        <a href="../../index.html#visuals">可视化</a>
+        <a href="../../slides.html">幻灯片</a>
+      </nav>
+      <p>CUDA Programming for NVIDIA H100s</p>
+      <p>Prateek Shukla</p>
+    </footer>
+
+    <script src="../../script.js"></script>
+  </body>
+</html>

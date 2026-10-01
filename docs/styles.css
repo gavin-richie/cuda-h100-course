@@ -2495,3 +2495,83 @@ body.is-nav-open .nav-toggle-icon span:nth-child(3) {
     transform: none;
   }
 }
+
+/* Language switch (EN <-> 中文) */
+
+.site-nav a.lang-switch {
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 0.3rem 0.85rem 0.42rem;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+  opacity: 0.85;
+  transition:
+    opacity 180ms var(--ease-out),
+    border-color 180ms var(--ease-out),
+    color 180ms var(--ease-out);
+}
+
+.site-nav a.lang-switch::after {
+  display: none;
+}
+
+.site-nav a.lang-switch:hover,
+.site-nav a.lang-switch:focus-visible {
+  opacity: 1;
+  color: var(--signal);
+}
+
+.site-nav a.lang-switch[aria-current="true"] {
+  color: var(--signal);
+  opacity: 1;
+}
+
+@media (max-width: 980px) {
+  .site-nav a.lang-switch {
+    justify-self: start;
+    margin-top: 0.6rem;
+  }
+}
+
+/* Chinese typography fallbacks: Latin display/body fonts do not carry CJK glyphs,
+   so every zh page resolves them to system CJK sans faces. */
+
+html[lang^="zh"] body {
+  font-family: "Manrope", "PingFang SC", "Hiragino Sans GB", "Source Han Sans SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+}
+
+html[lang^="zh"] h1,
+html[lang^="zh"] h2,
+html[lang^="zh"] h3,
+html[lang^="zh"] h4,
+html[lang^="zh"] h5,
+html[lang^="zh"] h6,
+html[lang^="zh"] .lesson-hero-title,
+html[lang^="zh"] .hero-credit {
+  font-family: "Urbanist", "PingFang SC", "Hiragino Sans GB", "Source Han Sans SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+}
+
+html[lang^="zh"] code,
+html[lang^="zh"] kbd,
+html[lang^="zh"] pre,
+html[lang^="zh"] samp {
+  font-family: "IBM Plex Mono", "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", monospace;
+}
+
+/* Neutralize negative Latin tracking on zh pages: CJK glyphs read best at
+   natural width; positive class-level tracking (kickers/eyebrows) still wins
+   because inherited values never override direct rules. */
+
+html[lang^="zh"] body {
+  letter-spacing: 0;
+}
+
+html[lang^="zh"] h1,
+html[lang^="zh"] h2,
+html[lang^="zh"] h3,
+html[lang^="zh"] h4,
+html[lang^="zh"] h5,
+html[lang^="zh"] h6 {
+  letter-spacing: 0;
+}

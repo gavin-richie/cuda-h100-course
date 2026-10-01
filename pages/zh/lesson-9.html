@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+      name="description"
+      content="《CUDA Programming for NVIDIA H100s》第 9 课：多 GPU 系统为何存在、DGX H100 节点解剖、NVLink、NVSwitch、ConnectX、rail 对齐的互联 fabric、UVA 与点对点（P2P）通信。"
+    >
+    <meta name="theme-color" content="#08111d">
+    <title>第 9 课 - 多 GPU 第 1 部分 | CUDA Programming for NVIDIA H100s</title>
+    <link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&family=Urbanist:wght@500;600;700;800&display=swap"
+      rel="stylesheet"
+    >
+    <link rel="stylesheet" href="../../styles.css">
+  </head>
+  <body class="lesson-view lesson-view-multigpu">
+    <header class="site-header">
+      <a class="header-mark" href="../../index.html#top" aria-label="CUDA Programming for NVIDIA H100s">
+        <span>Prateek Shukla</span>
+        <span>CUDA Programming for NVIDIA H100s</span>
+      </a>
+      <button
+        class="nav-toggle"
+        type="button"
+        aria-expanded="false"
+        aria-controls="site-nav"
+        aria-label="打开导航"
+      >
+        <span class="nav-toggle-label">菜单</span>
+        <span class="nav-toggle-icon" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
+        </span>
+      </button>
+      <nav class="site-nav" id="site-nav" aria-label="课程导航">
+        <a href="#overview">概览</a>
+        <a href="#node">节点</a>
+        <a href="#fabric">互联 fabric</a>
+        <a href="#topology">拓扑</a>
+        <a href="#cuda-p2p">CUDA P2P</a>
+        <a href="#takeaways">要点</a>
+        <a href="../../index.html#explore">探索</a>
+        <a class="lang-switch" href="../lesson-9.html" lang="en" hreflang="en" aria-label="Switch to English version">English</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="lesson-hero">
+        <div class="section-shell lesson-hero-grid">
+          <div class="lesson-hero-copy">
+            <p class="hero-credit">课程导览 / 第 09 课</p>
+            <h1 class="lesson-hero-title">多 GPU 第 1 部分</h1>
+            <p class="lesson-hero-summary">
+              第 9 课离开单 GPU kernel，追问真实的训练系统必须让数据流经什么。答案是一张互联 fabric：节点（node）内部的
+              NVLink 与 NVSwitch，节点外部的 ConnectX 与 rail 对齐的 InfiniBand，再加上作为这些硬件之上最底层软件的 CUDA
+              对等访问（peer access）与 UVA。
+            </p>
+            <div class="lesson-chip-list" aria-label="第 9 课主题">
+              <span class="lesson-chip">NVLink</span>
+              <span class="lesson-chip">NVSwitch</span>
+              <span class="lesson-chip">ConnectX</span>
+              <span class="lesson-chip">UVA</span>
+              <span class="lesson-chip">P2P</span>
+            </div>
+            <div class="hero-actions">
+              <a
+                class="button button-primary"
+                href="../../H100-Course/slides/9. Multi GPU.pdf"
+                target="_blank"
+                rel="noreferrer"
+              >
+                打开幻灯片
+              </a>
+              <a class="button button-secondary" href="../../index.html#explore">返回探索</a>
+            </div>
+          </div>
+
+          <aside class="lesson-meta-card" data-reveal>
+            <p class="lesson-meta-eyebrow">本课的重要性</p>
+            <h2>性能不再只是 kernel 问题，而变成互联 fabric 问题。</h2>
+            <p>
+              Hopper kernel 解释一块 GPU 如何保持忙碌。多 GPU（multi-GPU）系统解释的是：一旦内存、带宽（bandwidth）、拓扑（topology）与软件发现全部活在单个
+              SM 之外，许多 GPU 如何保持协调。
+            </p>
+            <dl class="lesson-facts">
+              <div>
+                <dt>课程位置</dt>
+                <dd>第 09 课，共 10 课</dd>
+              </div>
+              <div>
+                <dt>主要转变</dt>
+                <dd>瓶颈（bottleneck）从一条 kernel 流水线（pipeline）转移到加速器之间的通信 fabric。</dd>
+              </div>
+              <div>
+                <dt>配套幻灯片</dt>
+                <dd><code>9. Multi GPU.pdf</code></dd>
+              </div>
+              <div>
+                <dt>系统重点</dt>
+                <dd><code>NVLink</code>、<code>NVSwitch</code>、<code>ConnectX-7</code>、rail，以及 <code>cudaDeviceEnablePeerAccess</code></dd>
+              </div>
+            </dl>
+          </aside>
+        </div>
+      </section>
+
+      <section class="lesson-body">
+        <div class="section-shell lesson-layout">
+          <aside class="lesson-sidebar">
+            <div class="lesson-sidebar-card">
+              <p class="section-kicker">本页内容</p>
+              <nav class="lesson-side-nav" aria-label="第 9 课小节">
+                <a href="#overview">为什么要横向扩展</a>
+                <a href="#node">DGX H100 解剖</a>
+                <a href="#fabric">NVLink 与 NVSwitch</a>
+                <a href="#topology">ConnectX、rail 与拓扑</a>
+                <a href="#cuda-p2p">UVA 与对等访问</a>
+                <a href="#takeaways">实践指导</a>
+                <a href="#continue">继续课程</a>
+              </nav>
+            </div>
+
+            <div class="lesson-sidebar-card">
+              <p class="section-kicker">关键要点</p>
+              <ul class="lesson-mini-list">
+                <li>多 GPU 训练的存在，是因为即使一块极快的 H100，对前沿规模的工作负载也远远不够。</li>
+                <li>节点内部，NVLink 与 NVSwitch 打造出快速路径。节点外部，ConnectX 与网络 fabric 主导着扩展的故事。</li>
+                <li>CUDA P2P 与 UVA 提供了基本的直接访问，但一旦拓扑不再简单，仍然需要更高层的通信机制。</li>
+              </ul>
+            </div>
+
+            <div class="lesson-sidebar-card">
+              <p class="section-kicker">配套链接</p>
+              <a class="lesson-text-link" href="lesson-8.2.html">返回第 8.2 课</a>
+              <a class="lesson-text-link" href="lesson-10.html">打开第 10 课</a>
+              <a class="lesson-text-link" href="../../slides.html">浏览全部幻灯片</a>
+            </div>
+          </aside>
+
+          <article class="lesson-article">
+            <section class="lesson-chapter" id="overview" data-reveal>
+              <h2>为什么要横向扩展</h2>
+              <p>
+                幻灯片从一个直白的计算开始。如果训练大约每参数每 token 花费 6 次 FLOP，那么一个 1T 参数模型在 10T token 上就会落到
+                <code>6 x 10^25</code> FLOPs 附近。即使假装你能持续维持 1000 TFLOP/s，在单台设备上也要以世纪来计量。多 GPU
+                系统不是奢侈品。它是让训练预算进入人类时间尺度的唯一方式。
+              </p>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3>更多吞吐量</h3>
+                  <p>
+                    额外的 GPU 把数学摊到更多张量核心（tensor core）和更大的 HBM 容量上，从而缩短墙钟时间。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>更大的内存面</h3>
+                  <p>
+                    更大的模型和优化器状态不再装得进单台设备，因此系统需要许多 HBM
+                    池，外加一条足够快、能让它们在训练中保持足够一致的互联 fabric。
+                  </p>
+                </article>
+              </div>
+              <div class="lesson-note">
+                <p>
+                  <strong>本课的要点：</strong>一旦你离开单块 GPU，机器就不再只是 SM、张量核心和共享内存（shared memory）。机器现在是一个通信层级。
+                </p>
+              </div>
+            </section>
+
+            <section class="lesson-chapter" id="node" data-reveal>
+              <h2>一个 DGX H100 节点本身已经是一个小型分布式系统</h2>
+              <p>
+                笔记把 DGX H100 节点描述为：八块 SXM5 H100 GPU 由四颗 NVSwitch 芯片连接，外加八张 ConnectX-7
+                网卡，以及四个用于外部计算 fabric 的 OSFP 笼位。这一点很重要，因为这个节点不是一块 GPU 带一堆配件。它是一个由加速器和网络端点组成的、相互协调的网格。
+              </p>
+              <table class="lesson-table" aria-label="DGX H100 节点解剖">
+                <thead>
+                  <tr>
+                    <th>组件</th>
+                    <th>角色</th>
+                    <th>为什么重要</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>8 x H100 SXM5 GPUs</td>
+                    <td>节点内的算力与 HBM 容量。</td>
+                    <td>它们是需要交换激活、梯度和模型状态的端点。</td>
+                  </tr>
+                  <tr>
+                    <td>4 x NVSwitch</td>
+                    <td>内部全速交换 fabric。</td>
+                    <td>让每块 GPU 都能到达其他任何一块 GPU，而不会塌缩到缓慢的 PCIe 式路径。</td>
+                  </tr>
+                  <tr>
+                    <td>8 x ConnectX-7 NICs</td>
+                    <td>面向计算 fabric 的外部网络接口。</td>
+                    <td>一旦流量离开节点，就由这些设备掌管关键的带宽过渡。</td>
+                  </tr>
+                  <tr>
+                    <td>4 x OSFP cages</td>
+                    <td>物理的对外高速链路。</td>
+                    <td>把节点接入 rail 对齐的 InfiniBand fabric。</td>
+                  </tr>
+                </tbody>
+              </table>
+              <p>
+                本课还把计算 fabric 与存储 fabric 区分开。OSFP 路径用于节点间的 GPU
+                通信。数据集摄取与 checkpoint 流量使用另一组接口和另一种网络设计。
+              </p>
+            </section>
+
+            <section class="lesson-chapter" id="fabric" data-reveal>
+              <h2>节点内部，NVLink 与 NVSwitch 定义了快速路径</h2>
+              <p>
+                H100 的第四代 NVLink 给每块 GPU 约 900 GB/s 的双向带宽。笔记将其表述为 GPU 能够跳过 CPU 路径、直接从 HBM
+                出发通信，而不是在普通的以主机为中心的链路上来回弹跳的原因。
+              </p>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3>NVLink</h3>
+                  <p>
+                    直接的 GPU 到 GPU 链路层。笔记特别点名每块 H100 有 18 条独立的 NVLink
+                    链路，并把相对 PCIe 的带宽跃升视为现代多 GPU 系统行为不同的主要原因之一。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>NVSwitch</h3>
+                  <p>
+                    覆盖整个节点的交换层，使互连（interconnect）完全无阻塞。每块 GPU 都能以全速到达其他任何 GPU，而不会被困在菊花链的故事里。
+                  </p>
+                </article>
+              </div>
+              <p>
+                重要的概念转变是：节点开始像一张互联 fabric，而不是八个孤立的设备。笔记甚至强调交换机侧操作很重要，因为交换层不只是一根愚蠢的电缆交叉开关。
+              </p>
+              <div class="lesson-note">
+                <p>
+                  <strong>带宽悬崖：</strong>在一个 DGX 节点内部，GPU 通过 NVLink 交谈。一旦流量离开这台机器，它就会撞上网卡和外部网络。整个扩展故事的好坏，取决于你如何管理这次带宽下降与距离增加。
+                </p>
+              </div>
+            </section>
+
+            <section class="lesson-chapter" id="topology" data-reveal>
+              <h2>节点外部，ConnectX、rail 与网络拓扑决定扩展能否守住</h2>
+              <p>
+                ConnectX-7 是节点的出口。笔记描述了每台 DGX H100 有八张计算网卡，以及一个 rail 对齐的系统：所有节点上的 GPU 0
+                共享一条 rail，GPU 1 共享另一条，依此类推。这创造了八个并行的流量平面，而不是一个巨大的混合队列。
+              </p>
+              <table class="lesson-table" aria-label="节点间互联 fabric 概念">
+                <thead>
+                  <tr>
+                    <th>概念</th>
+                    <th>含义</th>
+                    <th>为什么重要</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>rail 对齐（Rail alignment）</td>
+                    <td>集群中相同的 GPU 索引各自映射到独立的网络平面。</td>
+                    <td>减少干扰，让 leaf 层的流量模式更干净。</td>
+                  </tr>
+                  <tr>
+                    <td>Leaf / spine / core</td>
+                    <td>分层的 InfiniBand 胖树（fat-tree），从一个可扩展单元（scalable unit）扩展到更大的 pod。</td>
+                    <td>决定路径多样性、超额订阅（oversubscription）行为与集群级可达性。</td>
+                  </tr>
+                  <tr>
+                    <td>自适应路由（Adaptive routing）</td>
+                    <td>交换机硬件根据拥塞情况在多条可行路径之间做选择。</td>
+                    <td>防止在有替代路径可用时，流量仍堆积到一条热门上行链路上。</td>
+                  </tr>
+                  <tr>
+                    <td>SHIELD 与网内逻辑（in-network logic）</td>
+                    <td>帮助隔离故障或卸载部分通信行为的硬件特性。</td>
+                    <td>如果互联 fabric 无法高效处理故障与归约，扩展会很快失败。</td>
+                  </tr>
+                </tbody>
+              </table>
+              <p>
+                笔记把 SuperPOD 式部署描述为用 Quantum-2 InfiniBand 交换机构建的 rail 优化三层互联 fabric。具体数字不如本课要点重要：一旦扩展到单节点之外，拓扑就不再是背景细节。它是性能工程的一部分。
+              </p>
+            </section>
+
+            <section class="lesson-chapter" id="cuda-p2p" data-reveal>
+              <h2>CUDA P2P 与 UVA 提供了基本的直接路径，但没有解决整个通信问题</h2>
+              <p>
+                CUDA 在这个层级给出两个关键机制。统一虚拟寻址（UVA，Unified Virtual
+                Addressing）意味着一个指针空间就能识别数据是位于主机内存还是某块 GPU 的 HBM。对等访问则允许一块 GPU 通过现有互联 fabric 直接访问另一块 GPU 的内存。
+              </p>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3><code>cudaDeviceEnablePeerAccess</code></h3>
+                  <p>
+                    启用直接的对等访问。笔记强调它是单向的，因此双向访问需要在两块设备上都调用它。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3><code>cudaMemcpyPeer</code></h3>
+                  <p>
+                    在设备之间直接发起内存拷贝、不经主机内存中转，前提是对等访问与相应拓扑可用。
+                  </p>
+                </article>
+              </div>
+              <p>
+                但本课也指出，裸 P2P 并不是完整的答案。在 HGX H100 板上，拓扑是由交换机连接的网格，不是一条直线。从一个 SM 到另一块 GPU 的 HBM
+                的手动 load/store 路径，既不会自动打满互联 fabric，也解决不了多方协调。这正是下一课转向 NCCL、PMIx 和 Slurm 的原因。
+              </p>
+              <pre class="lesson-pre"><code>// Conceptual CUDA-side flow
+cudaDeviceEnablePeerAccess(peer, 0);
+cudaMemcpyPeer(dst_ptr, dst_device, src_ptr, src_device, bytes);</code></pre>
+            </section>
+
+            <section class="lesson-chapter" id="takeaways" data-reveal>
+              <h2>实践指导</h2>
+              <ol>
+                <li><strong>测量带宽层级，而不只是测量 GPU。</strong>节点内 NVLink 行为与节点间 NIC 行为属于截然不同的扩展形态。</li>
+                <li><strong>把节点当作一张互联 fabric 来读。</strong>NVSwitch、ConnectX、OSFP、rail 和拓扑都是你的 kernel 实际运行于其中的机器的一部分。</li>
+                <li><strong>审慎地使用对等访问。</strong>直接的 GPU 内存访问很强大，但它并不是集合通信（collective）库或拓扑感知调度的自动替代品。</li>
+                <li><strong>预期拓扑会塑造性能。</strong>rail 对齐、自适应路由和交换机层级决定了集群增长时通信能否保持均衡。</li>
+                <li><strong>把第 9 课当作第 10 课的硬件序言。</strong>一旦理解了互联 fabric，编排栈就会容易理解得多。</li>
+              </ol>
+              <h3>术语表</h3>
+              <table class="lesson-table" aria-label="第 9 课术语表">
+                <tbody>
+                  <tr>
+                    <th>NVLink</th>
+                    <td>节点内用于高带宽通信的直接 GPU 到 GPU 互连。</td>
+                  </tr>
+                  <tr>
+                    <th>NVSwitch</th>
+                    <td>让节点内的 GPU 彼此以全速通信的交换 fabric。</td>
+                  </tr>
+                  <tr>
+                    <th>ConnectX-7</th>
+                    <td>节点用于外部 GPU 到 GPU 通信的高速网络接口。</td>
+                  </tr>
+                  <tr>
+                    <th>Rail</th>
+                    <td>一个隔离的网络平面，把所有节点上相同的 GPU 索引对齐到同一条通信路径上。</td>
+                  </tr>
+                  <tr>
+                    <th>UVA</th>
+                    <td>统一虚拟寻址（Unified Virtual Addressing），让系统能从指针值本身确定内存位置。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </section>
+
+            <section class="lesson-chapter" id="continue" data-reveal>
+              <h2>继续课程</h2>
+              <p>
+                第 9 课解释了硬件与 CUDA 侧的路径。最后一课进入编排：作业如何跨节点启动、rank 如何相互发现，以及集合通信实际如何被初始化和调度。
+              </p>
+              <div class="lesson-resource-grid">
+                <a class="lesson-resource-card" href="lesson-10.html">
+                  <span class="lesson-resource-label">下一课</span>
+                  <h3>多 GPU 第 2 部分</h3>
+                  <p>继续进入 Slurm、PMIx、NCCL 通信器设置、集合通信，以及大型作业背后的编排层。</p>
+                </a>
+                <a class="lesson-resource-card" href="../../slides.html">
+                  <span class="lesson-resource-label">课程材料</span>
+                  <h3>浏览全部幻灯片</h3>
+                  <p>当你想要更完整的幻灯片序列而非单一课程档案时，打开完整的幻灯片合集。</p>
+                </a>
+                <a class="lesson-resource-card" href="lesson-8.2.html">
+                  <span class="lesson-resource-label">回溯</span>
+                  <h3>Kernel 启动</h3>
+                  <p>如果你想要单节点 kernel 与系统互联 fabric 之间的桥梁，回到启动控制补充课。</p>
+                </a>
+                <a class="lesson-resource-card" href="../../index.html#explore">
+                  <span class="lesson-resource-label">探索</span>
+                  <h3>返回课程档案</h3>
+                  <p>返回主页，继续浏览已接入主界面的站内整合课程。</p>
+                </a>
+              </div>
+            </section>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <nav class="footer-nav" aria-label="页脚">
+        <a href="../../index.html#top">首页</a>
+        <a href="../../index.html#lessons">课程</a>
+        <a href="../../index.html#explore">探索</a>
+        <a href="../../index.html#visuals">可视化</a>
+        <a href="../../slides.html">幻灯片</a>
+      </nav>
+      <p>CUDA Programming for NVIDIA H100s</p>
+      <p>Prateek Shukla</p>
+    </footer>
+
+    <script src="../../script.js"></script>
+  </body>
+</html>

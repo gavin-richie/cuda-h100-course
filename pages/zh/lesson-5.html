@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+      name="description"
+      content="CUDA Programming for NVIDIA H100s 第 5 课：cp.async.bulk、tensor 拷贝、TMA 支撑的搬运、multicast、预取、缓存策略与完成语义。"
+    >
+    <meta name="theme-color" content="#08111d">
+    <title>第 5 课 - cp.async.bulk | CUDA Programming for NVIDIA H100s</title>
+    <link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&family=Urbanist:wght@500;600;700;800&display=swap"
+      rel="stylesheet"
+    >
+    <link rel="stylesheet" href="../../styles.css">
+  </head>
+  <body class="lesson-view lesson-view-copybulk">
+    <header class="site-header">
+      <a class="header-mark" href="../../index.html#top" aria-label="CUDA Programming for NVIDIA H100s">
+        <span>Prateek Shukla</span>
+        <span>CUDA Programming for NVIDIA H100s</span>
+      </a>
+      <button
+        class="nav-toggle"
+        type="button"
+        aria-expanded="false"
+        aria-controls="site-nav"
+        aria-label="打开导航"
+      >
+        <span class="nav-toggle-label">菜单</span>
+        <span class="nav-toggle-icon" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
+        </span>
+      </button>
+      <nav class="site-nav" id="site-nav" aria-label="课程导航">
+        <a href="#overview">概览</a>
+        <a href="#families">指令家族</a>
+        <a href="#completion">完成机制</a>
+        <a href="#multicast">组播</a>
+        <a href="#takeaways">要点</a>
+        <a href="../../index.html#explore">探索</a>
+        <a class="lang-switch" href="../lesson-5.html" lang="en" hreflang="en" aria-label="Switch to English version">English</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="lesson-hero">
+        <div class="section-shell lesson-hero-grid">
+          <div class="lesson-hero-copy">
+            <p class="hero-credit">课程导览 / 第 05 课</p>
+            <h1 class="lesson-hero-title"><code>cp.async.bulk</code></h1>
+            <p class="lesson-hero-summary">
+              第 5 课把 TMA 描述符变成了一套真正可用的指令家族。Hopper 的 bulk 拷贝以远低于
+              Ampere 时代拷贝循环的发射开销异步搬运大块区域，并把设计空间扩展到 tensor
+              感知的搬运、multicast、预取、缓存策略、bulk group 以及与屏障挂钩的完成机制。
+            </p>
+            <div class="lesson-chip-list" aria-label="第 5 课主题">
+              <span class="lesson-chip">cp.async.bulk</span>
+              <span class="lesson-chip">cp.async.bulk.tensor</span>
+              <span class="lesson-chip">Multicast</span>
+              <span class="lesson-chip">bulk_group</span>
+              <span class="lesson-chip">缓存策略</span>
+            </div>
+            <div class="hero-actions">
+              <a
+                class="button button-primary"
+                href="../../H100-Course/slides/5. cp.async.bulk.pdf"
+                target="_blank"
+                rel="noreferrer"
+              >
+                打开幻灯片
+              </a>
+              <a class="button button-secondary" href="../../index.html#explore">返回探索</a>
+            </div>
+          </div>
+
+          <aside class="lesson-meta-card" data-reveal>
+            <p class="lesson-meta-eyebrow">本课改变之处</p>
+            <h2>拷贝路径成为一套真正的指令家族，拥有自己的模式、契约与拓扑。</h2>
+            <p>
+              本课是屏障课与描述符课在数据搬运一侧的对应篇。它讲解 Hopper 如何
+              利用以 TMA 为后盾的 bulk 指令，在计算持续进行的同时搬运线性区域、
+              结构化 tensor tile、集群负载以及 multicast 扇出。
+            </p>
+            <dl class="lesson-facts">
+              <div>
+                <dt>课程位置</dt>
+                <dd>第 05 课，共 10 课</dd>
+              </div>
+              <div>
+                <dt>核心转变</dt>
+                <dd>单条发射线程即可为整个 block 或集群 tile 启动数据搬运。</dd>
+              </div>
+              <div>
+                <dt>配套幻灯片</dt>
+                <dd><code>5. cp.async.bulk.pdf</code></dd>
+              </div>
+              <div>
+                <dt>代码锚点</dt>
+                <dd><code>fast.cu/examples/matmul/matmul_12.cuh</code></dd>
+              </div>
+            </dl>
+          </aside>
+        </div>
+      </section>
+
+      <section class="lesson-body">
+        <div class="section-shell lesson-layout">
+          <aside class="lesson-sidebar">
+            <div class="lesson-sidebar-card">
+              <p class="section-kicker">本页内容</p>
+              <nav class="lesson-side-nav" aria-label="第 5 课小节">
+                <a href="#overview">为什么 bulk 拷贝很重要</a>
+                <a href="#families">原始形态与 tensor 形态</a>
+                <a href="#completion">完成机制</a>
+                <a href="#cache">缓存策略与预取</a>
+                <a href="#multicast">Multicast 与 DSMEM 扇出</a>
+                <a href="#takeaways">实践指引</a>
+                <a href="#continue">继续课程</a>
+              </nav>
+            </div>
+
+            <div class="lesson-sidebar-card">
+              <p class="section-kicker">关键要点</p>
+              <ul class="lesson-mini-list">
+                <li>Hopper 的 bulk 拷贝把地址生成和大块传输工作下放给 TMA 硬件。</li>
+                <li><code>cp.async.bulk</code> 与 <code>cp.async.bulk.tensor</code> 解决的是不同的搬运问题。</li>
+                <li>完成方式、缓存策略与 multicast 拓扑会实质性地改变 kernel 行为。</li>
+              </ul>
+            </div>
+
+            <div class="lesson-sidebar-card">
+              <p class="section-kicker">配套链接</p>
+              <a class="lesson-text-link" href="lesson-4.html">返回第 4 课</a>
+              <a class="lesson-text-link" href="lesson-6.html">打开第 6 课</a>
+              <a class="lesson-text-link" href="../../files/fast.cu/examples/matmul/matmul_12.cuh" target="_blank" rel="noreferrer">打开 bulk 拷贝代码锚点</a>
+            </div>
+          </aside>
+
+          <article class="lesson-article">
+            <section class="lesson-chapter" id="overview" data-reveal>
+              <h2>为什么 bulk 拷贝很重要</h2>
+              <p>
+                <code>cp.async.bulk</code> 是 Hopper 硬件加速的异步 bulk 传输指令家族。关键
+                不只是这条指令是非阻塞的，而在于 TMA 硬件可以接管地址
+                计算、循环展开以及大得多的区域的搬运，同时 SM 返回去继续计算。
+              </p>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3>Ampere 的 <code>cp.async</code></h3>
+                  <p>
+                    走 LSU 路径。warp 仍然要负责发射大量 16 字节操作，并自己承担
+                    地址生成的负担。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>Hopper 的 <code>cp.async.bulk</code></h3>
+                  <p>
+                    使用 TMA。单条线程就能启动整个 tile 的传输，由硬件跟踪进度并更新
+                    相应的完成对象。
+                  </p>
+                </article>
+              </div>
+              <p>
+                这一点很重要，因为数据搬运往往是最耗时的一环。降低发射开销、寄存器压力和
+                指令流量，能让 kernel 的其余部分更有余地去保持以计算为核心。
+              </p>
+            </section>
+
+            <section class="lesson-chapter" id="families" data-reveal>
+              <h2>原始形态与 tensor 感知的 bulk 拷贝解决的是不同的问题</h2>
+              <p>
+                Hopper 提供两大形态。原始形态是一条类 memcpy 的 bulk 指令。tensor 形态
+                具备描述符感知能力，使用 tensor map 加坐标来定位并搬运结构化 tile。
+              </p>
+              <h3>原始 / 线性形态</h3>
+              <pre class="lesson-pre"><code>cp.async.bulk.dst.src.barrier_type{.cache_hint}
+dst_addr, src_addr, size, mbarrier_addr;</code></pre>
+              <p>
+                当内存只是一段连续字节区间时使用它。硬件不会把源数据解释为带有维度和边界的
+                tensor。
+              </p>
+              <h3>Tensor 感知形态</h3>
+              <pre class="lesson-pre"><code>cp.async.bulk.tensor.ndim.dst.src.barrier_type{.cache_hint}{.multicast}
+dst_addr, tensor_map, coordinate_array, mbarrier_addr;</code></pre>
+              <p>
+                加上 <code>.tensor</code> 后，这条指令就具备了描述符感知能力。维度后缀告诉硬件要
+                读取多少个坐标，而 tensor map 携带形状、步长、边界、swizzle 以及
+                相关布局信息。
+              </p>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3>状态空间</h3>
+                  <p>
+                    源和目标的状态空间在指令形式中是显式的，包括
+                    <code>.global</code>、<code>.shared::cta</code> 和 <code>.shared::cluster</code>。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>加载模式</h3>
+                  <p>
+                    <code>.tile</code> 抓取一个致密的多维 tile。<code>.im2col</code> 在
+                    抓取过程中就完成适合卷积的变换，而不需要单独的重排 kernel。
+                  </p>
+                </article>
+              </div>
+            </section>
+
+            <section class="lesson-chapter" id="completion" data-reveal>
+              <h2>完成机制决定了消费者如何得知传输已经安全</h2>
+              <p>
+                本课把完成模型讲得非常明确，因为传输本身就是刻意异步的。
+                Hopper 提供两种主要完成方式。
+              </p>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3><code>mbarrier::complete_tx::bytes</code></h3>
+                  <p>
+                    更丰富的协调路径。硬件在字节到达时更新屏障的事务计数，并在预期工作量完成时
+                    翻转 phase。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3><code>bulk_group</code></h3>
+                  <p>
+                    更轻量的批处理模型。你发射操作，commit 该组，之后再 wait，直到
+                    最近的若干组中只剩有限数量的组仍处于 pending 状态。
+                  </p>
+                </article>
+              </div>
+              <p>
+                当你想在生产者与消费者之间做显式的按字节跟踪协调时，<code>mbarrier</code>
+                是正确的模型。当粗粒度的分组等待已经足够时，<code>bulk_group</code> 更简单。
+              </p>
+              <div class="lesson-note">
+                <p>
+                  <strong>重要区别：</strong> <code>bulk_group</code> 关注的是对异步操作做批处理。
+                  <code>mbarrier</code> 关注的是用一个可复用的同步对象来跟踪工作量与 phase 完成。
+                </p>
+              </div>
+            </section>
+
+            <section class="lesson-chapter" id="cache" data-reveal>
+              <h2>缓存策略与预取决定了 bulk 搬运与 L2 的交互方式</h2>
+              <p>
+                如果 kernel 不表达复用意图，bulk 拷贝可能让一次性流量灌满 L2。Hopper
+                允许指令通过缓存策略描述符附加 L2 缓存提示。
+              </p>
+              <table class="lesson-table" aria-label="cp.async.bulk 缓存策略指南">
+                <thead>
+                  <tr>
+                    <th>策略</th>
+                    <th>含义</th>
+                    <th>典型适用场景</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code>evict_first</code></td>
+                    <td>把缓存行标记为尽早驱逐的候选。</td>
+                    <td>流式或一次性数据，以及最终输出的写入。</td>
+                  </tr>
+                  <tr>
+                    <td><code>evict_last</code></td>
+                    <td>把缓存行标记为持久以延长驻留。</td>
+                    <td>被复用的权重或可能被反复消费的 tile。</td>
+                  </tr>
+                  <tr>
+                    <td><code>evict_normal</code></td>
+                    <td>默认行为。</td>
+                    <td>复用情况不明确或混合时。</td>
+                  </tr>
+                </tbody>
+              </table>
+              <pre class="lesson-pre"><code>createpolicy.fractional.L2::evict_last.b64 policy_reg, 1.0;
+createpolicy.fractional.L2::evict_first.b64 policy_reg, 1.0;</code></pre>
+              <p>
+                <code>cp.async.bulk.prefetch</code> 及其 tensor 感知变体还可以把数据预取进 L2 作为
+                延迟提示，但本课说得很清楚：预取不是正确性原语。如果后续的主
+                传输在数据被缓存之前就到达，硬件照样会从 HBM 读取。
+              </p>
+            </section>
+
+            <section class="lesson-chapter" id="multicast" data-reveal>
+              <h2>Multicast 把一次 HBM 读取变成集群范围的分发</h2>
+              <p>
+                Hopper 上一个反复出现的场景是：集群中的多个 CTA 需要同一个操作数 tile。在类 GEMM 的
+                工作负载中，许多 block 可能需要矩阵 A 的同一块切片，而各自消费矩阵 B 的不同切片。
+                Multicast 的存在就是为了避免为同一次 HBM 读取反复付费。
+              </p>
+              <ol>
+                <li>由一条 leader 线程发射 multicast TMA 指令。</li>
+                <li>数据从全局内存读取一次进入 L2。</li>
+                <li>缓存/控制器互连结构把它广播到掩码所选 CTA 的共享内存目的地。</li>
+                <li>每个参与的 CTA 的相关屏障状态都被更新。</li>
+                <li>各 CTA 中的消费者在自己本地的屏障上等待，待 tile 有效后继续执行。</li>
+              </ol>
+              <p>
+                讲义强调：屏障对象会在每个参与 CTA 的共享内存中以相同的相对偏移复制一份。
+                只有掩码中包含的 CTA 才应当充当该次传输的接收者。
+              </p>
+              <div class="lesson-note">
+                <p>
+                  <strong>实际后果：</strong>multicast 是一种拓扑特性，而不只是拷贝限定符。
+                  掩码、屏障放置与集群参与必须彼此一致，否则同步契约就会被破坏。
+                </p>
+              </div>
+              <h3>TMA 存储与归约</h3>
+              <p>
+                本课还指出，结构化存储可以使用 <code>bulk_group</code> 完成机制，而
+                Hopper 用 <code>cp.reduce.async</code> 把下放思想推得更远：TMA 路径也能接管
+                bulk 归约式的累加工作。
+              </p>
+            </section>
+
+            <section class="lesson-chapter" id="takeaways" data-reveal>
+              <h2>实践指引</h2>
+              <ol>
+                <li><strong>当内存只是字节时，使用原始 bulk 拷贝。</strong> 当形状、步长和边界本身就是问题的一部分时，使用 tensor 拷贝。</li>
+                <li><strong>有意识地选择完成模型。</strong> <code>mbarrier</code> 与 <code>bulk_group</code> 是不同的协调工具。</li>
+                <li><strong>根据复用情况选择缓存策略。</strong> 流式流量与持久权重需要相反的提示。</li>
+                <li><strong>把 multicast 当作集群契约对待。</strong> 掩码成员、屏障偏移与接收逻辑必须对齐。</li>
+                <li><strong>记住预取只是提示。</strong> 它可以降低延迟，但不保证驻留。</li>
+              </ol>
+              <h3>术语表</h3>
+              <table class="lesson-table" aria-label="第 5 课术语表">
+                <tbody>
+                  <tr>
+                    <th><code>cp.async.bulk</code></th>
+                    <td>Hopper 面向大块传输的异步 bulk 拷贝指令家族。</td>
+                  </tr>
+                  <tr>
+                    <th><code>cp.async.bulk.tensor</code></th>
+                    <td>具备描述符感知能力的结构化 tensor 拷贝形态。</td>
+                  </tr>
+                  <tr>
+                    <th><code>bulk_group</code></th>
+                    <td>面向 bulk 异步操作的批处理与分组等待机制。</td>
+                  </tr>
+                  <tr>
+                    <th>Multicast</th>
+                    <td>把一次抓取的负载在集群范围内扇出到多个 CTA 目的地。</td>
+                  </tr>
+                  <tr>
+                    <th>缓存策略描述符</th>
+                    <td>用 <code>createpolicy</code> 创建的 64 位对象，用于携带驱逐提示。</td>
+                  </tr>
+                  <tr>
+                    <th><code>cp.async.bulk.prefetch</code></th>
+                    <td>为后续 bulk 传输提供的 L2 预取提示。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </section>
+
+            <section class="lesson-chapter" id="continue" data-reveal>
+              <h2>继续课程</h2>
+              <p>
+                第 5 课定义了主要的异步搬运指令家族。第 6 课转向同一条
+                流水线的计算侧：WGMMA、warpgroup、由描述符支撑的张量核心发射，以及 Hopper
+                为大规模异步矩阵数学所使用的寄存器或共享内存操作数路径。
+              </p>
+              <div class="lesson-resource-grid">
+                <a class="lesson-resource-card" href="lesson-6.html">
+                  <span class="lesson-resource-label">下一课</span>
+                  <h3>WGMMA Part 1</h3>
+                  <p>进入 warpgroup 张量核心发射、<code>ldmatrix</code>、描述符与异步数学发射。</p>
+                </a>
+                <a class="lesson-resource-card" href="../../files/fast.cu/examples/matmul/matmul_12.cuh" target="_blank" rel="noreferrer">
+                  <span class="lesson-resource-label">代码锚点</span>
+                  <h3>matmul_12.cuh</h3>
+                  <p>在一条 Hopper kernel 路径中查看结构化 bulk 拷贝、multicast、bulk group 等待以及与 WGMMA 相关的搬运。</p>
+                </a>
+                <a class="lesson-resource-card" href="../../index.html#explore">
+                  <span class="lesson-resource-label">探索</span>
+                  <h3>返回课程档案</h3>
+                  <p>返回主页，浏览站内已有的集成课程页面。</p>
+                </a>
+              </div>
+            </section>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <nav class="footer-nav" aria-label="页脚导航">
+        <a href="../../index.html#top">首页</a>
+        <a href="../../index.html#lessons">课程</a>
+        <a href="../../index.html#explore">探索</a>
+        <a href="../../index.html#visuals">可视化</a>
+        <a href="../../slides.html">幻灯片</a>
+      </nav>
+      <p>CUDA Programming for NVIDIA H100s</p>
+      <p>Prateek Shukla</p>
+    </footer>
+
+    <script src="../../script.js"></script>
+  </body>
+</html>

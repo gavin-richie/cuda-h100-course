@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="description" content="Hopper 上的 WGMMA 基础：warpgroup、wgmma.mma_async、ldmatrix、共享内存描述符与张量核心数据流。">
+<meta name="theme-color" content="#08111d">
+        <title>第 6 课 - WGMMA Part 1 | CUDA Programming for NVIDIA H100s</title>
+    <link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&family=Urbanist:wght@500;600;700;800&display=swap"
+      rel="stylesheet"
+    >
+    <link rel="stylesheet" href="../../styles.css">
+  <!-- SEO:BEGIN -->
+    <meta name="author" content="Prateek Shukla">
+    <meta name="robots" content="index, follow, max-image-preview:large">
+    <link rel="canonical" href="https://cudacourseh100.github.io/pages/zh/lesson-6.html">
+    <meta property="og:locale" content="zh_CN">
+    <link rel="alternate" hreflang="en" href="https://cudacourseh100.github.io/pages/zh/lesson-6.html">
+    <link rel="alternate" hreflang="zh-CN" href="https://cudacourseh100.github.io/pages/zh/zh/lesson-6.html">
+    <link rel="alternate" hreflang="x-default" href="https://cudacourseh100.github.io/pages/zh/lesson-6.html">
+    <meta property="og:locale:alternate" content="en_US">
+    <meta property="og:site_name" content="CUDA Programming for NVIDIA H100s">
+    <meta property="og:type" content="article">
+    <meta property="og:title" content="WGMMA Part 1 | 第 6 课">
+    <meta property="og:description" content="Hopper 上的 WGMMA 基础：warpgroup、wgmma.mma_async、ldmatrix、共享内存描述符与张量核心数据流。">
+    <meta property="og:url" content="https://cudacourseh100.github.io/pages/zh/lesson-6.html">
+    <meta property="og:image" content="https://cudacourseh100.github.io/social-card.png">
+    <meta property="og:image:type" content="image/png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="CUDA Programming for NVIDIA H100s">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="WGMMA Part 1 | 第 6 课">
+    <meta name="twitter:description" content="Hopper 上的 WGMMA 基础：warpgroup、wgmma.mma_async、ldmatrix、共享内存描述符与张量核心数据流。">
+    <meta name="twitter:image" content="https://cudacourseh100.github.io/social-card.png">
+    <meta name="twitter:image:alt" content="CUDA Programming for NVIDIA H100s">
+    <meta property="article:author" content="Prateek Shukla">
+    <meta property="article:section" content="WGMMA 基础">
+    <meta property="article:tag" content="WGMMA">
+    <meta property="article:tag" content="warpgroup">
+    <meta property="article:tag" content="wgmma.mma_async">
+    <meta property="article:tag" content="ldmatrix">
+    <meta property="article:tag" content="张量核心">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "TechArticle",
+          "@id": "https://cudacourseh100.github.io/pages/zh/lesson-6.html#article",
+          "url": "https://cudacourseh100.github.io/pages/zh/lesson-6.html",
+          "headline": "WGMMA Part 1",
+          "name": "WGMMA Part 1",
+          "description": "Hopper 上的 WGMMA 基础：warpgroup、wgmma.mma_async、ldmatrix、共享内存描述符与张量核心数据流。",
+          "inLanguage": "zh-CN",
+          "author": {
+            "@type": "Person",
+            "@id": "https://cudacourseh100.github.io/#person",
+            "name": "Prateek Shukla",
+            "url": "https://cudacourseh100.github.io/"
+          },
+          "mainEntityOfPage": "https://cudacourseh100.github.io/pages/zh/lesson-6.html",
+          "articleSection": "WGMMA 基础",
+          "about": [
+            "WGMMA",
+            "warpgroup",
+            "wgmma.mma_async",
+            "ldmatrix",
+            "张量核心"
+          ],
+          "isPartOf": {
+            "@type": "Course",
+            "name": "CUDA Programming for NVIDIA H100s",
+            "url": "https://cudacourseh100.github.io/"
+          }
+        },
+        {
+          "@type": "BreadcrumbList",
+          "itemListElement": [
+            {
+              "@type": "ListItem",
+              "position": 1,
+              "name": "Home",
+              "item": "https://cudacourseh100.github.io/"
+            },
+            {
+              "@type": "ListItem",
+              "position": 2,
+              "name": "WGMMA Part 1",
+              "item": "https://cudacourseh100.github.io/pages/zh/lesson-6.html"
+            }
+          ]
+        }
+      ]
+    }
+    </script>
+    <!-- SEO:END -->
+  </head>
+  <body class="lesson-view lesson-view-wgmma">
+    <header class="site-header">
+      <a class="header-mark" href="../../index.html#top" aria-label="CUDA Programming for NVIDIA H100s">
+        <span>Prateek Shukla</span>
+        <span>CUDA Programming for NVIDIA H100s</span>
+      </a>
+      <button
+        class="nav-toggle"
+        type="button"
+        aria-expanded="false"
+        aria-controls="site-nav"
+        aria-label="打开导航"
+      >
+        <span class="nav-toggle-label">菜单</span>
+        <span class="nav-toggle-icon" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
+        </span>
+      </button>
+      <nav class="site-nav" id="site-nav" aria-label="课程导航">
+        <a href="#overview">概览</a>
+        <a href="#warpgroup">Warpgroup</a>
+        <a href="#instruction">指令</a>
+        <a href="#registers">寄存器</a>
+        <a href="#descriptors">描述符</a>
+        <a href="../../index.html#explore">探索</a>
+        <a class="lang-switch" href="../lesson-6.html" lang="en" hreflang="en" aria-label="Switch to English version">English</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="lesson-hero">
+        <div class="section-shell lesson-hero-grid">
+          <div class="lesson-hero-copy">
+            <p class="hero-credit">课程导览 / 第 06 课</p>
+            <h1 class="lesson-hero-title">WGMMA Part 1</h1>
+            <p class="lesson-hero-summary">
+              第 6 课是 Hopper 张量核心编程不再像旧式 warp 级 MMA 的地方。WGMMA
+              把四个 warp 变成一个计算单元，异步发射张量核心工作，从共享内存或寄存器消费操作数
+              tile，并依赖一套非常具体的描述符、寄存器布局和栅栏语义。
+            </p>
+            <div class="lesson-chip-list" aria-label="第 6 课主题">
+              <span class="lesson-chip">Warpgroup</span>
+              <span class="lesson-chip">wgmma.mma_async</span>
+              <span class="lesson-chip">ldmatrix</span>
+              <span class="lesson-chip">共享内存描述符</span>
+              <span class="lesson-chip">张量核心</span>
+            </div>
+            <div class="hero-actions">
+              <a
+                class="button button-primary"
+                href="../../H100-Course/slides/6. WGMMA-1.pdf"
+                target="_blank"
+                rel="noreferrer"
+              >
+                打开幻灯片
+              </a>
+              <a class="button button-secondary" href="../../index.html#explore">返回探索</a>
+            </div>
+          </div>
+
+          <aside class="lesson-meta-card" data-reveal>
+            <p class="lesson-meta-eyebrow">本课改变之处</p>
+            <h2>张量核心执行的单元从一个 warp 变成一个 warpgroup。</h2>
+            <p>
+              Hopper WGMMA 不只是一条更大的 MMA 指令。它改变了由谁发射工作、
+              操作数可以驻留在哪里、寄存器与共享内存布局如何被解释，以及异步数学发射
+              如何嵌入流水线化的 kernel。
+            </p>
+            <dl class="lesson-facts">
+              <div>
+                <dt>课程位置</dt>
+                <dd>第 06 课，共 10 课</dd>
+              </div>
+              <div>
+                <dt>核心转变</dt>
+                <dd>张量核心发射变成一个 128 线程的协调问题。</dd>
+              </div>
+              <div>
+                <dt>配套幻灯片</dt>
+                <dd><code>6. WGMMA-1.pdf</code></dd>
+              </div>
+              <div>
+                <dt>代码锚点</dt>
+                <dd><code>sm90_mma_tma_gmma_ss_warpspecialized.hpp</code></dd>
+              </div>
+            </dl>
+          </aside>
+        </div>
+      </section>
+
+      <section class="lesson-body">
+        <div class="section-shell lesson-layout">
+          <aside class="lesson-sidebar">
+            <div class="lesson-sidebar-card">
+              <p class="section-kicker">本页内容</p>
+              <nav class="lesson-side-nav" aria-label="第 6 课小节">
+                <a href="#overview">为什么 WGMMA 很重要</a>
+                <a href="#warpgroup">warpgroup 执行</a>
+                <a href="#instruction">指令形式</a>
+                <a href="#registers">寄存器与 <code>ldmatrix</code></a>
+                <a href="#descriptors">描述符与 swizzle</a>
+                <a href="#takeaways">实践要点</a>
+                <a href="#continue">继续课程</a>
+              </nav>
+            </div>
+
+            <div class="lesson-sidebar-card">
+              <p class="section-kicker">关键要点</p>
+              <ul class="lesson-mini-list">
+                <li>WGMMA 是由完整 warpgroup（而不是单个 warp）发射的异步张量核心操作。</li>
+                <li>操作数位置很重要：A 可以在寄存器或共享内存中，B 在共享内存中，累加器留在寄存器中。</li>
+                <li><code>ldmatrix</code> 与 WGMMA 描述符共同定义了硬件所期望的操作数布局。</li>
+              </ul>
+            </div>
+
+            <div class="lesson-sidebar-card">
+              <p class="section-kicker">配套链接</p>
+              <a class="lesson-text-link" href="lesson-5.html">返回第 5 课</a>
+              <a class="lesson-text-link" href="lesson-7.html">打开第 7 课</a>
+              <a class="lesson-text-link" href="../../files/sm90_mma_tma_gmma_ss_warpspecialized.hpp" target="_blank" rel="noreferrer">打开 WGMMA 代码锚点</a>
+              <a class="lesson-text-link" href="../../files/fast.cu/examples/matmul/matmul_12.cuh" target="_blank" rel="noreferrer">打开 matmul_12.cuh</a>
+            </div>
+          </aside>
+
+          <article class="lesson-article">
+            <section class="lesson-chapter" id="overview" data-reveal>
+              <h2>为什么 WGMMA 很重要</h2>
+              <p>
+                本课围绕张量数学梳理了四项关键的 Hopper 创新：张量核心工作现在是完全
+                异步的，执行范围从 warp 扩展到 warpgroup，操作数可以直接来自共享内存或
+                寄存器，不必再走旧的仅寄存器流程，而且 Hopper 为 FP8 和稀疏性添加了更强的支持。
+              </p>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3>异步数学发射</h3>
+                  <p>
+                    <code>wgmma.mma_async</code> 发射张量核心工作，并让发射线程在数学运算在途期间
+                    继续执行。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>更大的 tile，更干净的调度</h3>
+                  <p>
+                    WGMMA 让四个 warp 在一个更大的逻辑操作上协作，从而避免了把一大堆更小的
+                    warp 级 MMA 调用串联起来。
+                  </p>
+                </article>
+              </div>
+              <p>
+                这是前面异步搬运课程在计算侧的对应物。Hopper 希望数学与搬运
+                同时在途，而 WGMMA 正是让这一点变得可行的张量核心发射模型。
+              </p>
+            </section>
+
+            <section class="lesson-chapter" id="warpgroup" data-reveal>
+              <h2>warpgroup 执行才是范式转变</h2>
+              <p>
+                warpgroup 是四个 warp，即 128 条线程，作为张量核心发射的一个计算单元。四个
+                warp 一起到达 WGMMA 指令，调度器检查收敛性，把它们融合起来执行该操作，
+                把命令派发给张量核心，然后线程继续向前执行，而数学运算异步推进。
+              </p>
+              <div class="lesson-note">
+                <p>
+                  <strong>Hopper 为什么这样做：</strong>旧的单 warp MMA 模型让超大 tile 和深度
+                  流水线难以被干净地调度。warpgroup 模型让 Hopper 能以更低的发射开销让张量核心更
+                  长时间保持忙碌。
+                </p>
+              </div>
+              <h3>固定的 <code>m64</code></h3>
+              <p>
+                讲义解释了为什么 M 维度被固定为 64。硬件把操作数片段映射进一个静态的
+                张量核心输入模式，从而避免了昂贵得多的动态路由结构。N 是
+                更灵活的，而 K 由输入数据类型决定。
+              </p>
+              <table class="lesson-table" aria-label="WGMMA 形状指南">
+                <thead>
+                  <tr>
+                    <th>维度</th>
+                    <th>规则</th>
+                    <th>为什么重要</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>M</td>
+                    <td>固定为 64。</td>
+                    <td>与 warpgroup 张量核心发射的静态硬件映射相匹配。</td>
+                  </tr>
+                  <tr>
+                    <td>N</td>
+                    <td>灵活，通常为 8 或 16 的倍数，最大到 256。</td>
+                    <td>控制处理 B 和 C 的多少列。</td>
+                  </tr>
+                  <tr>
+                    <td>K</td>
+                    <td>由输入精度决定。</td>
+                    <td>决定张量核心每次操作消耗的内积深度。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </section>
+
+            <section class="lesson-chapter" id="instruction" data-reveal>
+              <h2>指令形式告诉你硬件期望什么</h2>
+              <p>
+                核心操作是 <code>wgmma.mma_async</code>。操作数 A 可以来自寄存器或共享内存。
+                操作数 B 来自共享内存。累加器和输出位于寄存器中。
+              </p>
+              <pre class="lesson-pre"><code>wgmma.mma_async.sync.aligned.shape.dtypeD.dtypeA.dtypeB
+d, a_operand, b_desc, scale_d, imm_scale_a, imm_scale_b, imm_trans_a, imm_trans_b;</code></pre>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3><code>.sync</code></h3>
+                  <p>
+                    要求参与 warpgroup 的线程必须一起到达该指令，然后发射才能继续。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3><code>.aligned</code></h3>
+                  <p>
+                    断言 warpgroup 在该指令的程序计数器（PC）处收敛。这里的分支发散会破坏契约。
+                  </p>
+                </article>
+              </div>
+              <h3><code>wgmma.fence.sync.aligned</code></h3>
+              <p>
+                本课在这里说得很精确：这是一个面向后续
+                <code>wgmma.mma_async</code> 使用的寄存器排序屏障，而不是完成屏障。它在后续异步 WGMMA 把这些寄存器重新用作累加器或 A 片段之前，为相关寄存器访问排序。共享内存的排序仍然
+                需要合适的异步 proxy 栅栏。
+              </p>
+            </section>
+
+            <section class="lesson-chapter" id="registers" data-reveal>
+              <h2>寄存器来源的 A 与 <code>ldmatrix</code></h2>
+              <p>
+                Hopper 给了 A 两个可能的驻留位置。如果 A 被大量复用，把它留在寄存器里可以
+                减轻共享内存压力。如果它的复用程度不足以抵偿额外的指令和寄存器开销，
+                那么从共享内存取数可能更好。
+              </p>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3>A 放在寄存器中</h3>
+                  <p>
+                    复用率高时是好选择。从寄存器加载 A 可以避免 A 和 B 一起把共享内存 bank 压力加倍。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>A 放在共享内存中</h3>
+                  <p>
+                    当 kernel 从寄存器复用中获得的收益不足以抵偿额外的地址与寄存器开销时，
+                    这种方式更简单。
+                  </p>
+                </article>
+              </div>
+              <h3><code>ldmatrix</code> 是主要的寄存器加载路径</h3>
+              <p>
+                <code>ldmatrix</code> 的行为不像普通的线性共享内存加载。它把矩阵片段
+                搬进一种不透明的寄存器模式，这种模式已经与张量核心的输入预期对齐。提供地址的线程
+                并不总是持有结果数据的线程。
+              </p>
+              <ul>
+                <li><code>.m8n8</code> 描述被加载矩阵片段的几何形状。</li>
+                <li><code>.x1</code>、<code>.x2</code> 和 <code>.x4</code> 控制每条指令加载多少个 8x8 核心矩阵。</li>
+                <li><code>.trans</code> 可以在加载时完成转置，避免手动洗牌。</li>
+                <li>BF16 数据被打包进 32 位寄存器，因为 NVIDIA 的寄存器是 32 位容器。</li>
+              </ul>
+              <div class="lesson-note">
+                <p>
+                  <strong>重要硬件事实：</strong>WGMMA 期望的正是 <code>ldmatrix</code> 产出的那种片段布局。
+                  寄存器排布不是随意的。
+                </p>
+              </div>
+            </section>
+
+            <section class="lesson-chapter" id="descriptors" data-reveal>
+              <h2>共享内存描述符与 swizzle 补全了操作数契约</h2>
+              <p>
+                当 A 或 B 来自共享内存时，WGMMA 使用一个紧凑的 64 位描述符而不是普通
+                指针。本课描述了五个打包字段：基地址、leading byte offset（LBO）、stride byte offset
+                （SBO）、matrix base offset（矩阵基偏移）和 swizzle 模式。
+              </p>
+              <table class="lesson-table" aria-label="WGMMA 描述符字段">
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>含义</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>基地址</td>
+                    <td>tile 的共享内存地址，16 字节对齐并打包进描述符。</td>
+                  </tr>
+                  <tr>
+                    <td>LBO</td>
+                    <td>沿操作数 leading 方向使用的首方向字节偏移。</td>
+                  </tr>
+                  <tr>
+                    <td>SBO</td>
+                    <td>另一个核心矩阵方向上的步长字节偏移。</td>
+                  </tr>
+                  <tr>
+                    <td>矩阵基偏移</td>
+                    <td>当 tile 不从模式边界开始时，把描述符在重复的 swizzle 区域内偏移。</td>
+                  </tr>
+                  <tr>
+                    <td>Swizzle 模式位</td>
+                    <td>告诉硬件操作数是无 swizzle，还是使用 128B、64B 或 32B swizzle。</td>
+                  </tr>
+                </tbody>
+              </table>
+              <p>
+                共享内存做 swizzle，是为了让物理地址映射与对 bank 友好的访问模式对齐。
+                描述符必须编码正确的 swizzle 模式。如果不这样，WGMMA 会把被打乱的数据当作线性布局读出来。
+              </p>
+              <pre class="lesson-pre"><code>// Representative pattern from the repo
+uint64_t desc_a = make_smem_desc(&amp;sA[0]);
+uint64_t desc_b = make_smem_desc(&amp;sB[0]);
+
+asm volatile(
+  "wgmma.mma_async.sync.aligned.m64n256k16.f32.bf16.bf16 ..."
+);</code></pre>
+            </section>
+
+            <section class="lesson-chapter" id="takeaways" data-reveal>
+              <h2>实践要点</h2>
+              <ol>
+                <li><strong>把 warpgroup 收敛当作正确性的一部分。</strong> WGMMA 不容忍随意的分支发散。</li>
+                <li><strong>深思熟虑地选择 A 的位置。</strong> 复用率高时寄存器有帮助；否则它们可能变成纯粹的压力。</li>
+                <li><strong>尊重描述符与 swizzle 契约。</strong> 张量核心只看得到描述符让它们看到的东西。</li>
+                <li><strong>记住 <code>wgmma.fence</code> 是什么、不是什么。</strong> 它为寄存器使用排序，但它不是面向共享内存可见性的完成屏障。</li>
+                <li><strong>留意累加器压力。</strong> 大 tile 和异步数学很强大，但它们会让寄存器用量迅速爆炸。</li>
+              </ol>
+              <h3>术语表</h3>
+              <table class="lesson-table" aria-label="第 6 课术语表">
+                <tbody>
+                  <tr>
+                    <th>Warpgroup</th>
+                    <td>四个 warp 一起作为一个张量核心发射单元。</td>
+                  </tr>
+                  <tr>
+                    <th><code>wgmma.mma_async</code></th>
+                    <td>Hopper 的异步 warpgroup 矩阵乘累加指令。</td>
+                  </tr>
+                  <tr>
+                    <th><code>ldmatrix</code></th>
+                    <td>把矩阵片段从共享内存加载进张量核心所期望的寄存器布局的主要机制。</td>
+                  </tr>
+                  <tr>
+                    <th>描述符</th>
+                    <td>WGMMA 使用的打包 64 位共享内存操作数描述，用于解释操作数布局与步长。</td>
+                  </tr>
+                  <tr>
+                    <th>Scale / transpose 立即数</th>
+                    <td>控制累加器行为、符号缩放和转置行为的指令标志。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </section>
+
+            <section class="lesson-chapter" id="continue" data-reveal>
+              <h2>继续课程</h2>
+              <p>
+                第 6 课介绍了基本的 WGMMA 执行模型和操作数设置。下一课会更深入地
+                讲解 commit 与 wait 组、FP8 行为、<code>stmatrix</code>、打包约束，以及
+                WGMMA 生命周期的其余细节。
+              </p>
+              <div class="lesson-resource-grid">
+                <a class="lesson-resource-card" href="lesson-7.html">
+                  <span class="lesson-resource-label">下一课</span>
+                  <h3>WGMMA Part 2</h3>
+                  <p>继续学习 commit 与 wait 组、FP8、<code>stmatrix</code> 以及 WGMMA 生命周期的其余部分。</p>
+                </a>
+                <a class="lesson-resource-card" href="../../files/sm90_mma_tma_gmma_ss_warpspecialized.hpp" target="_blank" rel="noreferrer">
+                  <span class="lesson-resource-label">代码锚点</span>
+                  <h3>SM90 WGMMA 主循环</h3>
+                  <p>在 CUTLASS SM90 代码中查看真实的 warpgroup 栅栏、commit 批次、等待以及由描述符支撑的主循环发射。</p>
+                </a>
+                <a class="lesson-resource-card" href="../../index.html#explore">
+                  <span class="lesson-resource-label">探索</span>
+                  <h3>返回课程档案</h3>
+                  <p>返回主页的探索区，浏览站内已有的集成课程页面。</p>
+                </a>
+              </div>
+            </section>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <nav class="footer-nav" aria-label="页脚导航">
+        <a href="../../index.html#top">首页</a>
+        <a href="../../index.html#lessons">课程</a>
+        <a href="../../index.html#explore">探索</a>
+        <a href="../../index.html#visuals">可视化</a>
+        <a href="../../slides.html">幻灯片</a>
+      </nav>
+      <p>CUDA Programming for NVIDIA H100s</p>
+      <p>Prateek Shukla</p>
+    </footer>
+
+    <script src="../../script.js"></script>
+  </body>
+</html>

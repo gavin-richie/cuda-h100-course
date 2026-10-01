@@ -1,0 +1,541 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+      name="description"
+      content="CUDA Programming for NVIDIA H100s 第 3 课：异步性、屏障、mbarrier、proxy 栅栏、集群屏障与等待语义。"
+    >
+    <meta name="theme-color" content="#08111d">
+    <title>第 3 课 - 异步与屏障 | CUDA Programming for NVIDIA H100s</title>
+    <link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&family=Urbanist:wght@500;600;700;800&display=swap"
+      rel="stylesheet"
+    >
+    <link rel="stylesheet" href="../../styles.css">
+  </head>
+  <body class="lesson-view lesson-view-barriers">
+    <header class="site-header">
+      <a class="header-mark" href="../../index.html#top" aria-label="CUDA Programming for NVIDIA H100s">
+        <span>Prateek Shukla</span>
+        <span>CUDA Programming for NVIDIA H100s</span>
+      </a>
+      <button
+        class="nav-toggle"
+        type="button"
+        aria-expanded="false"
+        aria-controls="site-nav"
+        aria-label="打开导航"
+      >
+        <span class="nav-toggle-label">菜单</span>
+        <span class="nav-toggle-icon" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
+        </span>
+      </button>
+      <nav class="site-nav" id="site-nav" aria-label="课程导航">
+        <a href="#overview">概览</a>
+        <a href="#proxies">proxy</a>
+        <a href="#mbarrier">mbarrier</a>
+        <a href="#groups">异步组</a>
+        <a href="#takeaways">要点</a>
+        <a href="../../index.html#explore">探索</a>
+        <a class="lang-switch" href="../lesson-3.html" lang="en" hreflang="en" aria-label="Switch to English version">English</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="lesson-hero">
+        <div class="section-shell lesson-hero-grid">
+          <div class="lesson-hero-copy">
+            <p class="hero-credit">课程导览 / 第 03 课</p>
+            <h1 class="lesson-hero-title">异步与屏障</h1>
+            <p class="lesson-hero-summary">
+              只有当重叠始终保持正确，Hopper 才能作为异步机器运转。第 3 课是同步一课：proxy 分离、RAW 与 WAR 冒险、release 与 acquire 排序、<code>mbarrier</code>、
+              集群级协调，以及那些让张量数据保持有效（而不仅仅是在途）的等待规则。
+            </p>
+            <div class="lesson-chip-list" aria-label="第 3 课主题">
+              <span class="lesson-chip">延迟隐藏</span>
+              <span class="lesson-chip">mbarrier</span>
+              <span class="lesson-chip">fence.proxy.async</span>
+              <span class="lesson-chip">wait_group</span>
+              <span class="lesson-chip">barrier.cluster</span>
+            </div>
+            <div class="hero-actions">
+              <a
+                class="button button-primary"
+                href="../../H100-Course/slides/3. Asynchronicity and barriers.pdf"
+                target="_blank"
+                rel="noreferrer"
+              >
+                打开幻灯片
+              </a>
+              <a class="button button-secondary" href="../../index.html#explore">返回探索</a>
+            </div>
+          </div>
+
+          <aside class="lesson-meta-card" data-reveal>
+            <p class="lesson-meta-eyebrow">本课改变之处</p>
+            <h2>完成已经不再足够。可见性与排序成为设计的一部分。</h2>
+            <p>
+              本课从"发起异步工作"推进到"让异步工作安全"。这意味着要推理谁在触碰内存、数据何时跨 proxy 变为可见，以及共享内存（shared memory）所有权如何在生产者（producer）与消费者（consumer）stage 之间翻转而不破坏 tile 流水线（pipeline）。
+            </p>
+            <dl class="lesson-facts">
+              <div>
+                <dt>课程位置</dt>
+                <dd>第 03 课，共 10 课</dd>
+              </div>
+              <div>
+                <dt>核心转变</dt>
+                <dd>正确的重叠需要显式的同步契约。</dd>
+              </div>
+              <div>
+                <dt>配套幻灯片</dt>
+                <dd><code>3. Asynchronicity and barriers.pdf</code></dd>
+              </div>
+              <div>
+                <dt>代码锚点</dt>
+                <dd><code>sm90_gemm_tma_warpspecialized_pingpong.hpp</code></dd>
+              </div>
+            </dl>
+          </aside>
+        </div>
+      </section>
+
+      <section class="lesson-body">
+        <div class="section-shell lesson-layout">
+          <aside class="lesson-sidebar">
+            <div class="lesson-sidebar-card">
+              <p class="section-kicker">本页内容</p>
+              <nav class="lesson-side-nav" aria-label="第 3 课小节">
+                <a href="#overview">异步为什么重要</a>
+                <a href="#proxies">proxy 与冒险</a>
+                <a href="#fences">栅栏与可见性</a>
+                <a href="#mbarrier">mbarrier 流水线</a>
+                <a href="#groups">集群屏障与异步组</a>
+                <a href="#takeaways">设计规则</a>
+                <a href="#ptx-mbarrier">PTX mbarrier 深入解析</a>
+                <a href="#ptx-fences">PTX 栅栏深入解析</a>
+                <a href="#ptx-named-barriers">PTX 命名屏障深入解析</a>
+                <a href="#continue">继续学习本课程</a>
+              </nav>
+            </div>
+
+            <div class="lesson-sidebar-card">
+              <p class="section-kicker">关键要点</p>
+              <ul class="lesson-mini-list">
+                <li>异步的全部意义在于延迟隐藏（Latency Hiding），而不是抽象意义上"晚一点再做"。</li>
+                <li>proxy 分离意味着常规的线程局部排序，对异步拷贝与张量工作来说并不足够。</li>
+                <li><code>mbarrier</code> 跟踪的是跨可复用相位的工作与所有权，而不仅仅是线程到达。</li>
+              </ul>
+            </div>
+
+            <div class="lesson-sidebar-card">
+              <p class="section-kicker">配套链接</p>
+              <a class="lesson-text-link" href="lesson-2.html">返回第 2 课</a>
+              <a class="lesson-text-link" href="lesson-4.html">打开第 4 课</a>
+              <a class="lesson-text-link" href="../../files/sm90_gemm_tma_warpspecialized_pingpong.hpp" target="_blank" rel="noreferrer">打开屏障代码锚点</a>
+            </div>
+          </aside>
+
+          <article class="lesson-article">
+            <section class="lesson-chapter" id="overview" data-reveal>
+              <h2>异步为什么重要</h2>
+              <p>
+                课程笔记用最简单的方式构建了整个故事：系统在<strong>做（doing）</strong>与<strong>取（fetching）</strong>之间交替。在同步世界里，这两者先后发生。在异步世界里，对工作或数据的请求与结果被消费的时刻解耦。这就是延迟隐藏的来源。
+              </p>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3>阻塞 / 同步</h3>
+                  <p>
+                    发起线程暂停，直到操作完全完成。控制权不会返回，因此没有任何有用的工作与这段等待重叠。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>非阻塞 / 异步</h3>
+                  <p>
+                    发起线程立即重新获得控制权，而系统的另一部分在后台跟踪这项工作。
+                  </p>
+                </article>
+              </div>
+              <p>
+                在 GPU 上这个区别至关重要，因为计算通常很快，而数据搬运相对较慢。Hopper 在这一点上做得非常彻底：TMA 与张量核心（Tensor Core）的设计让计算得以继续，而搬运与完成跟踪发生在别处。
+              </p>
+              <div class="lesson-note">
+                <p>
+                  <strong>心智模型：</strong>目标不是最大化异步指令的数量。目标是让昂贵的单元保持忙碌，同时较慢的操作在并行中完成。
+                </p>
+              </div>
+            </section>
+
+            <section class="lesson-chapter" id="proxies" data-reveal>
+              <h2>proxy、异步生命周期与冒险为何出现</h2>
+              <p>
+                本课的生命周期分为三个 stage：初始化异步工作，让系统的另一部分在无关工作继续进行的同时跟踪它，然后在结果真正被需要的确切位置进行同步。Hopper 增加了一个关键转折：发起工作的部分与执行工作的部分可能位于不同的 <strong>proxy</strong> 之中。
+              </p>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3>Generic proxy</h3>
+                  <p>
+                    由线程普通发起的加载与存储。在这条路径内，排序基本就是 CUDA 程序员对单线程内顺序指令已有的预期。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>Async proxy</h3>
+                  <p>
+                    诸如 <code>cp.async.bulk</code> 与 <code>wgmma</code> 这样的硬件路径。一旦启动，它们就独立于发起线程当前的指令流运行。
+                  </p>
+                </article>
+              </div>
+              <h3>RAW 与 WAR 冒险</h3>
+              <p>
+                如果 generic proxy 写入数据，而 async proxy 立即读取同一位置，async 路径可能观察到过期的状态。这就是写后读（read-after-write）冒险（hazard）。如果 async proxy 或张量消费者还在读取某个 tile，而生产者过早覆写同一共享内存区域，那就是读后写（write-after-read）冒险。
+              </p>
+              <ul>
+                <li>当发起速度远快于内存可见性时，RAW 要紧。</li>
+                <li>当双缓冲的共享 tile 被激进复用时，WAR 要紧。</li>
+                <li>"指令已执行完"本身解决不了其中任何一个问题。</li>
+              </ul>
+            </section>
+
+            <section class="lesson-chapter" id="fences" data-reveal>
+              <h2>栅栏关乎可见性契约，而非繁文缛节</h2>
+              <p>
+                栅栏（fence）约束内存效果如何变为可观察。在 Hopper 工作流中，重要的区别在于普通排序与跨 proxy 排序。标准的每线程顺序执行并不会自动让 generic 路径与 async 路径对内存状态达成一致。
+              </p>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3>Release（释放）</h3>
+                  <p>
+                    生产者一侧的排序。较早的写入必须在随后的信号或到达（arrival）之前变为可见。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>Acquire（获取）</h3>
+                  <p>
+                    消费者一侧的排序。较晚的读取不得提前滑到"告知消费者数据已就绪"的同步点之前。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>跨 proxy 栅栏</h3>
+                  <p>
+                    当 generic 路径与 async 路径触碰同一位置时必需。在课程笔记中，<code>fence.proxy.async</code> 就是那座显式的桥梁。
+                  </p>
+                </article>
+              </div>
+              <pre class="lesson-pre"><code>// Conceptual producer / consumer ordering
+generic proxy writes shared state
+cross-proxy or release fence
+producer signals barrier
+consumer waits with acquire semantics
+consumer reads the tile safely</code></pre>
+              <div class="lesson-note">
+                <p>
+                  <strong>重要限制：</strong>跨 proxy 栅栏仍然只是每线程的排序。它不能替代 CTA 级或集群级的协调——在当选线程（elected thread）发起异步操作之前，需要这种协调来确保所有写入者都已完成准备。
+                </p>
+              </div>
+            </section>
+
+            <section class="lesson-chapter" id="mbarrier" data-reveal>
+              <h2><code>mbarrier</code> 流水线</h2>
+              <p>
+                本课将 <code>mbarrier</code> 定义为一种驻留在共享内存、用于跟踪异步工作的硬件同步原语。这正是它与经典屏障（barrier）的区别。经典屏障问的是"线程到齐了吗？"而 <code>mbarrier</code> 可以问"被跟踪的工作完成了吗？这个相位是否可以安全消费？"
+              </p>
+              <ol>
+                <li>在共享内存中初始化屏障，并设定预期的到达数。</li>
+                <li>为异步操作附加预期的事务工作量。</li>
+                <li>发起异步拷贝或生产者 stage。</li>
+                <li>在消费者测试或等待期间做独立的工作。</li>
+                <li>翻转相位，并把屏障复用到下一个 tile。</li>
+              </ol>
+              <h3>初始化与复用</h3>
+              <p>
+                笔记在这里说得很直白：初始化的 bug 会毁掉其他一切。屏障驻留在共享内存中，地址必须被正确转换，对象必须 64 位对齐。复用是基于相位的，因此流水线的每一轮都作为独立的世代（generation）被跟踪，而不是一个无限延续的计数器。
+              </p>
+              <h3>预期事务数</h3>
+              <p>
+                对于异步数据搬运，屏障不只是跟踪线程到达。它还跟踪尚未完成的工作量，笔记中常将其表述为事务字节数（transaction bytes）。完成需要到达侧与被跟踪工作侧都达到屏障所期望的状态。
+              </p>
+              <h3>奇偶性与等待语义</h3>
+              <p>
+                基于奇偶性（parity）的等待检查的是某一个特定的工作相位。<code>mbarrier.try_wait.parity</code> 与 <code>mbarrier.test_wait.parity</code> 告诉消费者它关心的那个相位是否已经完成。<code>.acquire</code> 形式额外提供了让后续读取安全的可见性保证。
+              </p>
+              <pre class="lesson-pre"><code>// Conceptual consumer pattern
+while (!phase_complete) {
+  // do unrelated work, test again, or yield
+}
+// acquire visibility of the produced tile
+consume shared-memory data or descriptor-backed work safely</code></pre>
+              <div class="lesson-note">
+                <p>
+                  <strong>笔记中的实用模式：</strong>在寄存器（register）中保存一个本地相位位，并在每次循环迭代结束时翻转它，而不是随身携带更重的同步令牌。
+                </p>
+              </div>
+            </section>
+
+            <section class="lesson-chapter" id="groups" data-reveal>
+              <h2>集群屏障、异步组与命名屏障</h2>
+              <p>
+                Hopper 需要不止一种同步方式，因为所有权的问题在变化。有时你需要在同一个线程块内协调生产者与消费者。有时你需要集群中的多个 CTA 全部实际就位，远程共享内存访问才是安全的。有时你希望把若干异步批量拷贝作为一个批次一起提交。
+              </p>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3><code>barrier.cluster.arrive</code></h3>
+                  <p>发出集群级到达信号，而不立即停下独立工作。</p>
+                </article>
+                <article class="lesson-card">
+                  <h3><code>barrier.cluster.wait</code></h3>
+                  <p>阻塞，直到所有参与者都已到达，且对集群可见的写入可以安全消费。</p>
+                </article>
+                <article class="lesson-card">
+                  <h3><code>cp.async.bulk.commit_group</code></h3>
+                  <p>把已发起的批量异步操作打包进一个已提交的 bulk group，后续的等待可以针对它进行推理。</p>
+                </article>
+                <article class="lesson-card">
+                  <h3><code>cp.async.bulk.wait_group&lt;N&gt;</code></h3>
+                  <p>等待直到只剩 <em>N</em> 个已提交的组仍处于未决状态，而不是等到 <em>N</em> 个组已经完成。</p>
+                </article>
+              </div>
+              <p>
+                命名屏障解决的是另一类问题。它们允许 warp 的子集之间同步，而不强迫整个线程块在一个全块会合点停下。这使它们对 warp 专用化（warp specialization）的内部生产者-消费者流水线非常有用。
+              </p>
+              <div class="lesson-note">
+                <p>
+                  <strong>集群屏障为何存在：</strong>标准的 <code>__syncthreads()</code> 无法协调集群内线程块之间的交接，而这对 DSMEM 访问与 TMA 多播（multicast）模式至关重要。
+                </p>
+              </div>
+            </section>
+
+            <section class="lesson-chapter" id="takeaways" data-reveal>
+              <h2>设计规则</h2>
+              <ol>
+                <li><strong>把进度与可见性分开。</strong>"完成"与"可以安全读取"不可互换。</li>
+                <li><strong>针对所有权问题选用正确的屏障。</strong>线程会合、异步工作跟踪与集群就位是不同的契约。</li>
+                <li><strong>诚实地使用作用域。</strong>CTA 作用域、集群作用域、GPU 作用域与系统作用域不是装饰性后缀。</li>
+                <li><strong>让共享内存复用显式化。</strong>如果所有权正在变化，就用到达、等待与相位管理把它编码出来。</li>
+                <li><strong>把异步当作调度（scheduling）工具来用。</strong>回报是干净的重叠，让机器持续保持生产力。</li>
+              </ol>
+              <h3>术语表</h3>
+              <table class="lesson-table" aria-label="第 3 课术语表">
+                <tbody>
+                  <tr>
+                    <th>Proxy</th>
+                    <td>一条内存操作路径或代理，拥有自己的可见性与排序规则。</td>
+                  </tr>
+                  <tr>
+                    <th>RAW 冒险</th>
+                    <td>消费者在生产者较新的写入在其所用路径上可见之前就读取了数据。</td>
+                  </tr>
+                  <tr>
+                    <th>WAR 冒险</th>
+                    <td>生产者在消费者读完上一个 tile 之前就覆写了数据。</td>
+                  </tr>
+                  <tr>
+                    <th><code>mbarrier</code></th>
+                    <td>一种共享内存硬件屏障，跨可复用的相位跟踪异步工作。</td>
+                  </tr>
+                  <tr>
+                    <th>相位 / 奇偶性</th>
+                    <td>可复用屏障的世代状态，通常用单个 bit 跟踪。</td>
+                  </tr>
+                  <tr>
+                    <th><code>wait_group</code></th>
+                    <td>一种批量异步组等待，基于仍有多少已提交组处于未决状态。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </section>
+
+            <section class="lesson-chapter" id="ptx-mbarrier" data-reveal>
+              <h2>PTX ISA 深入解析：<code>mbarrier</code> 内部机制</h2>
+              <p><em>参考：PTX ISA 9.2 的 <code>mbarrier</code> 章节与 async-copy / async-store / async-reduce 小节。</em></p>
+
+              <h3><code>mbarrier</code> 究竟是什么</h3>
+              <p>在 PTX 中，<code>mbarrier</code> 是一个驻留在共享内存、8 字节对齐的不透明 <code>.b64</code> 对象。它跟踪四件事：</p>
+              <ol>
+                <li><strong>当前相位（phase）</strong>。</li>
+                <li>当前相位的<strong>未决到达数（pending-arrival count）</strong>。</li>
+                <li>下一相位的<strong>预期到达数（expected-arrival count）</strong>。</li>
+                <li>当前相位用于未决异步事务的<strong><code>tx-count</code></strong>。</li>
+              </ol>
+              <p>只有当<strong>两</strong>项（未决到达数与 <code>tx-count</code>）都归零，一个相位才算完成。完成时，硬件会原子地推进相位，并从预期到达数重新装载未决到达数。</p>
+
+              <h3>两笔债务的心智模型</h3>
+              <p>一个 <code>mbarrier</code> 相位带有<strong>两笔债务</strong>，必须全部还清，等待者才能观察到完成：</p>
+              <table class="lesson-table" aria-label="mbarrier 债务">
+                <tbody>
+                  <tr>
+                    <th>债务</th>
+                    <th>含义</th>
+                    <th>由何增加</th>
+                    <th>由何减少</th>
+                  </tr>
+                  <tr>
+                    <td>到达债务</td>
+                    <td>还有多少到达未完成？</td>
+                    <td><code>mbarrier.init</code>（设定初始计数）</td>
+                    <td><code>mbarrier.arrive*</code></td>
+                  </tr>
+                  <tr>
+                    <td>事务债务</td>
+                    <td>还有多少异步事务未完成？</td>
+                    <td><code>mbarrier.expect_tx</code> / <code>mbarrier.arrive.expect_tx</code></td>
+                    <td><code>mbarrier.complete_tx</code>（显式或隐式）</td>
+                  </tr>
+                </tbody>
+              </table>
+              <p><code>mbarrier.arrive*</code> 偿还第一笔债务。<code>mbarrier.expect_tx</code> 增加第二笔债务。<code>mbarrier.complete_tx</code> 偿还第二笔债务。<code>mbarrier.arrive.expect_tx</code> 一步完成两件事。</p>
+
+              <h3>关键指令</h3>
+              <p><strong><code>mbarrier.init</code></strong> —— 创建一个预期 <code>count</code> 次到达、异步债务为零的屏障。</p>
+              <p><strong><code>mbarrier.arrive</code></strong> —— 递减未决到达数。除非 <code>tx-count</code> 已经为零，否则不触及异步工作。若 <code>tx-count</code> 非零，仅凭 <code>arrive</code> 无法完成相位。</p>
+              <p><strong><code>mbarrier.arrive.expect_tx</code></strong> —— 融合形式：把 <code>txCount</code> 加到事务债务上，并贡献一次到达。它可能让相位<em>看起来</em>到达已完成，而只要 <code>tx-count</code> 非零，实际就仍未完成。</p>
+              <p><strong><code>mbarrier.expect_tx</code></strong> —— 纯粹地"增加异步债务"。当异步工作与线程到达在逻辑上彼此独立时很有用。</p>
+              <p><strong><code>mbarrier.complete_tx</code></strong> —— 递减 <code>tx-count</code>。显式形式只有 <code>.relaxed</code>，但若干异步指令会生成<strong>隐式</strong>的 <code>complete-tx</code>，并带有 <code>.release</code> 语义（例如 <code>cp.async.bulk...mbarrier::complete_tx::bytes</code>）。</p>
+
+              <h3>当心</h3>
+              <p>若 <code>tx-count</code> 非零，<code>arrive</code> 并不等于完成。如果你在该相位中的任何位置调用过 <code>expect_tx</code>，屏障就必须等到 <code>complete_tx</code> 把 <code>tx-count</code> 拉回零才会完成。</p>
+            </section>
+
+            <section class="lesson-chapter" id="ptx-fences" data-reveal>
+              <h2>PTX ISA 深入解析：栅栏与 proxy 栅栏</h2>
+              <p><em>参考：PTX ISA 9.2，fence / membar 小节。</em></p>
+
+              <h3>心智模型</h3>
+              <p>普通的加载/存储/原子操作/归约使用<strong>generic proxy</strong>。一些机制使用不同的 proxy，尤其是 <strong>async proxy</strong>。proxy 是对某种内存访问方式的抽象标签——如果两个访问使用了不同的 proxy，就需要一个 <strong>proxy 栅栏</strong>来同步它们。</p>
+              <p>内存模型要求两个操作使用<strong>同一个 proxy</strong>，才能相对彼此"morally strong"。一边是 generic、另一边是 async，意味着普通的内存排序推理不再足够——你需要一个跨 proxy 栅栏。</p>
+              <p><code>cp.async</code>、<code>cp.async.bulk</code>、<code>cp.reduce.async.bulk</code> 与 <code>wgmma.mma_async</code> 在普通程序顺序下并不是普通的线程内操作。它们的排序保证更弱，你必须依赖每个指令族文档化的完成与同步规则。</p>
+
+              <h3>普通栅栏：<code>fence</code> 与旧式 <code>membar</code></h3>
+              <p>主要语法：<code>fence{.sem}.scope</code>。语义：<code>.sc</code>、<code>.acq_rel</code>、<code>.acquire</code>、<code>.release</code>。作用域：<code>.cta</code>、<code>.cluster</code>、<code>.gpu</code>、<code>.sys</code>。</p>
+              <p><strong><code>fence.acq_rel</code>（默认）</strong> —— 对大多数同步模式已经足够，但只有与周围正确的内存操作配合时才真正同步。它不是什么神奇的全局同步。</p>
+              <p><strong><code>fence.sc</code></strong> —— 更强，也更慢。所有 morally strong 的 <code>fence.sc</code> 操作都参与 Fence-SC 顺序。若其中两个在该顺序下有序，它们就会彼此同步。</p>
+
+              <h3>具体到 <code>fence.proxy.async</code></h3>
+              <p>当一侧位于<strong>generic proxy</strong>、另一侧位于<strong>async proxy</strong> 时使用。</p>
+              <p><strong>并非每个看起来异步的指令都使用 async proxy：</strong></p>
+              <ul>
+                <li>普通的 <code>cp.async</code> 属于 generic proxy。</li>
+                <li><code>cp.async.bulk</code> 与 <code>cp.reduce.async.bulk</code> 属于 async proxy。</li>
+                <li><code>wgmma.mma_async</code> 属于 async proxy。</li>
+              </ul>
+              <p>这里很容易踩坑。当 generic 路径与 async 路径触碰同一位置时，使用 <code>fence.proxy.async</code>。</p>
+              <p><strong>当心：</strong><code>wgmma.fence</code> 不能替代 <code>fence.proxy.async</code>。<code>wgmma.fence</code> 排序的是<strong>寄存器</strong>访问。如果你以 generic 方式把矩阵写入<strong>共享内存</strong>，而 <code>wgmma.mma_async</code> 通过 async proxy 读取它们，那么共享内存的交接仍然需要 <code>fence.proxy.async</code>。</p>
+              <p><strong>重要：</strong><code>fence.proxy.async</code> <strong>并不</strong>意味着"等到异步操作完成"。它只提供跨 proxy 排序。完成是另一件事。你需要同时具备完成等待（确认异步操作已经结束）与 proxy 栅栏语义（让 generic 代码可以安全读取结果）。</p>
+            </section>
+
+            <section class="lesson-chapter" id="ptx-named-barriers" data-reveal>
+              <h2>PTX ISA 深入解析：CTA 命名屏障</h2>
+              <p><em>参考：PTX ISA 9.2，<code>bar</code> / <code>barrier</code> 指令页。</em></p>
+
+              <p>由 <code>bar</code> / <code>barrier</code> 指令使用的 CTA 屏障资源。每个 CTA 拥有 <strong>16 个编号为 <code>0..15</code> 的逻辑屏障</strong>。操作数 <code>a</code> 选择其中之一。</p>
+
+              <h3>指令形式</h3>
+              <pre class="lesson-pre"><code>// Preferred spellings
+barrier{.cta}.sync{.aligned}          a{, b};
+barrier{.cta}.arrive{.aligned}        a, b;
+barrier{.cta}.red.popc{.aligned}.u32  d, a{, b}, {!}c;
+barrier{.cta}.red.op{.aligned}.pred   p, a{, b}, {!}c;
+
+// Older short spellings
+bar{.cta}.sync                        a{, b};
+bar{.cta}.arrive                      a, b;
+bar{.cta}.red.popc.u32                d, a{, b}, {!}c;
+bar{.cta}.red.op.pred                 p, a{, b}, {!}c;</code></pre>
+
+              <h3>关键指令</h3>
+              <p><strong><code>bar.sync a</code></strong> —— 标准的命名屏障等待。线程发出到达信号，并等待所有参与的 warp 到齐。</p>
+              <p><strong><code>bar.arrive a, b</code></strong> —— 发出到达信号但<strong>不</strong>等待其他参与的 warp。支持生产者/消费者模式。</p>
+              <p><strong><code>bar.red.popc.u32 d, a, c</code></strong> —— 屏障加 population-count 归约。统计谓词 <code>c</code> 为真的线程数。</p>
+              <p><strong><code>bar.red.and.pred p, a, c</code></strong> —— 屏障加各参与者谓词的逻辑与。</p>
+              <p><strong><code>bar.red.or.pred p, a, c</code></strong> —— 屏障加各参与者谓词的逻辑或。</p>
+
+              <h3>内存排序语义</h3>
+              <p><code>.sync</code>、<code>.red</code> 与 <code>.arrive</code> 保证：当屏障完成时，先前的内存访问相对所有参与线程都已被<strong>执行（performed）</strong>。<code>.sync</code> 与 <code>.red</code> 还额外保证线程在屏障完成之前不会发射新的内存访问。</p>
+              <p>"已执行（performed）"的含义是：读取已从内存传出、不会再被其他参与者修改；写入对所有参与者可见、旧值不再可读。这正是命名屏障在 CTA 内的共享内存交接上是安全的原因。</p>
+
+              <h3>快速参考</h3>
+              <table class="lesson-table" aria-label="命名屏障形式">
+                <tbody>
+                  <tr>
+                    <th>形式</th>
+                    <th>是否阻塞</th>
+                    <th>内存保证</th>
+                  </tr>
+                  <tr>
+                    <td><code>bar.sync a</code></td>
+                    <td>是</td>
+                    <td>先前的写入可见；完成前不发射新的访问</td>
+                  </tr>
+                  <tr>
+                    <td><code>bar.sync a, b</code></td>
+                    <td>是</td>
+                    <td>先前的写入可见；完成前不发射新的访问</td>
+                  </tr>
+                  <tr>
+                    <td><code>bar.arrive a, b</code></td>
+                    <td><strong>否</strong></td>
+                    <td>先前的写入可见</td>
+                  </tr>
+                  <tr>
+                    <td><code>bar.red.popc.u32 d, a, c</code></td>
+                    <td>是</td>
+                    <td>先前的写入可见；完成前不发射新的访问</td>
+                  </tr>
+                  <tr>
+                    <td><code>bar.red.and.pred p, a, c</code></td>
+                    <td>是</td>
+                    <td>先前的写入可见；完成前不发射新的访问</td>
+                  </tr>
+                </tbody>
+              </table>
+            </section>
+
+            <section class="lesson-chapter" id="continue" data-reveal>
+              <h2>继续学习本课程</h2>
+              <p>
+                第 3 课建立了异步机器的正确性层。第 4 课回到搬运路径本身：Hopper TMA 如何在传输开始之前，用一个由 host 编码的描述符（descriptor）来描述 tile、步长（stride）、swizzle、交错与抓取策略。
+              </p>
+              <div class="lesson-resource-grid">
+                <a class="lesson-resource-card" href="lesson-4.html">
+                  <span class="lesson-resource-label">下一课</span>
+                  <h3>cuTensorMap</h3>
+                  <p>进入描述符驱动的异步搬运：TMA、swizzle、交错与 L2 提升。</p>
+                </a>
+                <a class="lesson-resource-card" href="../../files/sm90_gemm_tma_warpspecialized_pingpong.hpp" target="_blank" rel="noreferrer">
+                  <span class="lesson-resource-label">代码锚点</span>
+                  <h3>SM90 Ping-Pong kernel</h3>
+                  <p>在一个真实的 Hopper 流水线中，直接查看屏障、warp 角色与共享内存所有权的安排。</p>
+                </a>
+                <a class="lesson-resource-card" href="../../index.html#explore">
+                  <span class="lesson-resource-label">探索</span>
+                  <h3>返回课程档案</h3>
+                  <p>回到首页，在不离开站点框架的情况下在整合课程页之间移动。</p>
+                </a>
+              </div>
+            </section>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <nav class="footer-nav" aria-label="页脚">
+        <a href="../../index.html#top">首页</a>
+        <a href="../../index.html#lessons">课程</a>
+        <a href="../../index.html#explore">探索</a>
+        <a href="../../index.html#visuals">可视化</a>
+        <a href="../../slides.html">幻灯片</a>
+      </nav>
+      <p>CUDA Programming for NVIDIA H100s</p>
+      <p>Prateek Shukla</p>
+    </footer>
+
+    <script src="../../script.js"></script>
+  </body>
+</html>

@@ -9,7 +9,9 @@ const outDir = path.join(rootDir, "docs");
 const site = {
   name: "CUDA Programming for NVIDIA H100s",
   author: "Prateek Shukla",
-  url: "https://cudacourseh100.github.io/",
+  // Official home is the org user site; override with SITE_URL when deploying
+  // the same bundle from a project site (owner.github.io/<repo>/).
+  url: process.env.SITE_URL || "https://cudacourseh100.github.io/",
   description:
     "Advanced CUDA course on NVIDIA Hopper and H100 by Prateek Shukla, covering TMA, cuTensorMap, cp.async.bulk, mbarrier, WGMMA, kernel design, and multi-GPU orchestration.",
   socialImagePath: "/social-card.png",
@@ -194,7 +196,176 @@ const lessonPages = [
 
 const rootFiles = ["index.html", "slides.html", "styles.css", "script.js", "favicon.svg", "social-card.svg", "social-card.png"];
 
-const pageFiles = lessonPages.map(({ file }) => file);
+const zhLessonPages = [
+  {
+    file: "pages/zh/lesson-1.html",
+    path: "/pages/zh/lesson-1.html",
+    lessonNumber: 1,
+    shortTitle: "H100 简介",
+    title: "第 1 课 - H100 简介 | CUDA Programming for NVIDIA H100s",
+    description:
+      "学习 H100 架构、内存层级、张量核心，以及改变现代 CUDA kernel 设计方式的 Hopper 异步执行模型。",
+    section: "Hopper 架构",
+    tags: ["H100", "Hopper 架构", "内存层级", "张量核心", "异步执行"],
+    lang: "zh-CN",
+    locale: "zh_CN",
+  },
+  {
+    file: "pages/zh/lesson-2.html",
+    path: "/pages/zh/lesson-2.html",
+    lessonNumber: 2,
+    shortTitle: "集群、数据类型、内联 PTX 与指针",
+    title: "第 2 课 - 集群、数据类型、内联 PTX 与指针 | CUDA Programming for NVIDIA H100s",
+    description:
+      "Hopper 上的线程块集群、分布式共享内存、内联 PTX、状态空间与指针转换。",
+    section: "集群与 PTX",
+    tags: ["线程块集群", "分布式共享内存", "内联 PTX", "状态空间", "指针"],
+    lang: "zh-CN",
+    locale: "zh_CN",
+  },
+  {
+    file: "pages/zh/lesson-3.html",
+    path: "/pages/zh/lesson-3.html",
+    lessonNumber: 3,
+    shortTitle: "异步与屏障",
+    title: "第 3 课 - 异步与屏障 | CUDA Programming for NVIDIA H100s",
+    description:
+      "mbarrier、生产者/消费者协调、延迟隐藏、RAW 与 WAR 冒险、fence，以及 Hopper 上重叠执行下的正确性。",
+    section: "屏障与同步",
+    tags: ["mbarrier", "屏障", "延迟隐藏", "RAW 冒险", "proxy fence"],
+    lang: "zh-CN",
+    locale: "zh_CN",
+  },
+  {
+    file: "pages/zh/lesson-4.html",
+    path: "/pages/zh/lesson-4.html",
+    lessonNumber: 4,
+    shortTitle: "cuTensorMap",
+    title: "第 4 课 - cuTensorMap | CUDA Programming for NVIDIA H100s",
+    description:
+      "Hopper 上 TMA 的 cuTensorMap 描述符：张量形状、stride、swizzle、interleave、L2 promotion 与描述符驱动的异步搬运。",
+    section: "TMA 与描述符",
+    tags: ["cuTensorMap", "TMA", "张量描述符", "swizzle", "L2 promotion"],
+    lang: "zh-CN",
+    locale: "zh_CN",
+  },
+  {
+    file: "pages/zh/lesson-5.html",
+    path: "/pages/zh/lesson-5.html",
+    lessonNumber: 5,
+    shortTitle: "cp.async.bulk",
+    title: "第 5 课 - cp.async.bulk | CUDA Programming for NVIDIA H100s",
+    description:
+      "Hopper 的 cp.async.bulk 指令、基于屏障的完成机制、结构化与非结构化传输、multicast、预取与异步规约。",
+    section: "异步批量拷贝",
+    tags: ["cp.async.bulk", "异步拷贝", "屏障完成", "multicast", "预取"],
+    lang: "zh-CN",
+    locale: "zh_CN",
+  },
+  {
+    file: "pages/zh/lesson-6.html",
+    path: "/pages/zh/lesson-6.html",
+    lessonNumber: 6,
+    shortTitle: "WGMMA Part 1",
+    title: "第 6 课 - WGMMA Part 1 | CUDA Programming for NVIDIA H100s",
+    description:
+      "Hopper 上的 WGMMA 基础：warpgroup、wgmma.mma_async、ldmatrix、共享内存描述符与张量核心数据流。",
+    section: "WGMMA 基础",
+    tags: ["WGMMA", "warpgroup", "wgmma.mma_async", "ldmatrix", "张量核心"],
+    lang: "zh-CN",
+    locale: "zh_CN",
+  },
+  {
+    file: "pages/zh/lesson-7.html",
+    path: "/pages/zh/lesson-7.html",
+    lessonNumber: 7,
+    shortTitle: "WGMMA Part 2",
+    title: "第 7 课 - WGMMA Part 2 | CUDA Programming for NVIDIA H100s",
+    description:
+      "组提交与等待、stmatrix、FP8 打包、K-major 约束，以及面向 Hopper 张量核心 kernel 的稀疏 WGMMA。",
+    section: "进阶 WGMMA",
+    tags: ["WGMMA", "FP8", "stmatrix", "K-major", "稀疏张量核心"],
+    lang: "zh-CN",
+    locale: "zh_CN",
+  },
+  {
+    file: "pages/zh/lesson-8.html",
+    path: "/pages/zh/lesson-8.html",
+    lessonNumber: 8,
+    shortTitle: "内核设计",
+    title: "第 8 课 - 内核设计 | CUDA Programming for NVIDIA H100s",
+    description:
+      "面向计算受限 Hopper kernel 的 warp 专用化、流水线、循环缓冲、持久调度与 epilogue。",
+    section: "内核设计",
+    tags: ["warp 专用化", "内核设计", "持久调度", "循环缓冲", "epilogue"],
+    lang: "zh-CN",
+    locale: "zh_CN",
+  },
+  {
+    file: "pages/zh/lesson-8.1.html",
+    path: "/pages/zh/lesson-8.1.html",
+    lessonNumber: "8.1",
+    shortTitle: "Stream-K",
+    title: "第 8.1 课 - Stream-K | CUDA Programming for NVIDIA H100s",
+    description:
+      "Hopper 上的 Stream-K 调度：工作分解、fixup、调度器状态，以及 GEMM kernel 的利用率权衡。",
+    section: "Stream-K 调度",
+    tags: ["Stream-K", "tile 调度", "调度器状态", "fixup", "GEMM 利用率"],
+    lang: "zh-CN",
+    locale: "zh_CN",
+  },
+  {
+    file: "pages/zh/lesson-8.2.html",
+    path: "/pages/zh/lesson-8.2.html",
+    lessonNumber: "8.2",
+    shortTitle: "Kernel 启动",
+    title: "第 8.2 课 - Kernel 启动 | CUDA Programming for NVIDIA H100s",
+    description:
+      "Hopper 上的 kernel 启动控制：launch bounds、grid 常量、依赖网格、程序化流串行，以及生产者与消费者 kernel 之间的重叠调优。",
+    section: "Kernel 启动控制",
+    tags: ["kernel 启动", "依赖网格", "程序化流串行", "griddepcontrol", "launch bounds"],
+    lang: "zh-CN",
+    locale: "zh_CN",
+  },
+  {
+    file: "pages/zh/lesson-9.html",
+    path: "/pages/zh/lesson-9.html",
+    lessonNumber: 9,
+    shortTitle: "多 GPU 第 1 部分",
+    title: "第 9 课 - 多 GPU 第 1 部分 | CUDA Programming for NVIDIA H100s",
+    description:
+      "NVLink、NVSwitch、DGX H100 拓扑、点对点传输，以及多 GPU 扩展背后的互连约束。",
+    section: "多 GPU 拓扑",
+    tags: ["NVLink", "NVSwitch", "DGX H100", "点对点", "多 GPU 扩展"],
+    lang: "zh-CN",
+    locale: "zh_CN",
+  },
+  {
+    file: "pages/zh/lesson-10.html",
+    path: "/pages/zh/lesson-10.html",
+    lessonNumber: 10,
+    shortTitle: "多 GPU 第 2 部分",
+    title: "第 10 课 - 多 GPU 第 2 部分 | CUDA Programming for NVIDIA H100s",
+    description:
+      "Slurm、PMIx、NCCL 通信器与集合通信，以及 H100 系统上的数据、张量、流水线与专家并行编排。",
+    section: "分布式编排",
+    tags: ["Slurm", "PMIx", "NCCL", "集合通信", "分布式编排"],
+    lang: "zh-CN",
+    locale: "zh_CN",
+  },
+];
+
+// Wire hreflang alternates between the English and Chinese version of each lesson.
+const allLessonPages = [...lessonPages, ...zhLessonPages];
+for (const lesson of allLessonPages) {
+  const base = lesson.file.replace(/^pages\//, "").replace(/\.html$/, "");
+  lesson.alternates = [
+    { lang: "en", path: `/pages/${base}.html` },
+    { lang: "zh-CN", path: `/pages/zh/${base}.html` },
+  ];
+}
+
+const pageFiles = allLessonPages.map(({ file }) => file);
 
 const slideFiles = [
   "0. CUDA Programming for NVIDIA H100 GPUs.pdf",
@@ -260,6 +431,15 @@ const pageSeo = new Map([
       ...lesson,
       kind: "lesson",
       socialTitle: `${lesson.shortTitle} | Lesson ${lesson.lessonNumber}`,
+      openGraphType: "article",
+    },
+  ]),
+  ...zhLessonPages.map((lesson) => [
+    lesson.file,
+    {
+      ...lesson,
+      kind: "lesson",
+      socialTitle: `${lesson.shortTitle} | 第 ${lesson.lessonNumber} 课`,
       openGraphType: "article",
     },
   ]),
@@ -485,7 +665,7 @@ function buildStructuredData(meta) {
           url: pageUrl,
           name: meta.title,
           description: meta.description,
-          inLanguage: "en",
+          inLanguage: meta.lang ?? "en",
           author: person,
           about: meta.tags,
           isPartOf: {
@@ -513,7 +693,7 @@ function buildStructuredData(meta) {
           headline: meta.shortTitle,
           name: meta.shortTitle,
           description: meta.description,
-          inLanguage: "en",
+          inLanguage: meta.lang ?? "en",
           author: person,
           mainEntityOfPage: pageUrl,
           articleSection: meta.section,
@@ -562,7 +742,20 @@ function renderSeoBlock(meta) {
     `    <meta name="author" content="${escapeHtml(site.author)}">`,
     `    <meta name="robots" content="${escapeHtml(robots)}">`,
     `    <link rel="canonical" href="${escapeHtml(pageUrl)}">`,
-    '    <meta property="og:locale" content="en_US">',
+    `    <meta property="og:locale" content="${escapeHtml(meta.locale ?? "en_US")}">`,
+  ];
+
+  for (const alt of meta.alternates ?? []) {
+    tags.push(`    <link rel="alternate" hreflang="${escapeHtml(alt.lang)}" href="${escapeHtml(absoluteUrl(alt.path))}">`);
+  }
+  if (meta.alternates?.length) {
+    tags.push(`    <link rel="alternate" hreflang="x-default" href="${escapeHtml(absoluteUrl(meta.path))}">`);
+  }
+  if (meta.locale && meta.locale !== "en_US") {
+    tags.push('    <meta property="og:locale:alternate" content="en_US">');
+  }
+
+  tags.push(
     `    <meta property="og:site_name" content="${escapeHtml(site.name)}">`,
     `    <meta property="og:type" content="${escapeHtml(meta.openGraphType)}">`,
     `    <meta property="og:title" content="${escapeHtml(meta.socialTitle ?? meta.title)}">`,
@@ -578,7 +771,7 @@ function renderSeoBlock(meta) {
     `    <meta name="twitter:description" content="${escapeHtml(meta.description)}">`,
     `    <meta name="twitter:image" content="${escapeHtml(socialImageUrl)}">`,
     `    <meta name="twitter:image:alt" content="${escapeHtml(site.name)}">`,
-  ];
+  );
 
   if (meta.openGraphType === "article") {
     tags.push(`    <meta property="article:author" content="${escapeHtml(site.author)}">`);
@@ -689,7 +882,7 @@ async function validateHtml(relativeHtmlPath) {
     const targetPath = path.resolve(path.dirname(htmlPath), cleanValue);
 
     if (!(await fileExists(targetPath))) {
-      if (cleanValue.endsWith(".pdf") || cleanValue.startsWith("files/") || cleanValue.startsWith("../files/") || cleanValue.startsWith("preview-snaps/")) {
+      if (cleanValue.endsWith(".pdf") || cleanValue.startsWith("files/") || cleanValue.startsWith("../files/") || cleanValue.startsWith("../../files/") || cleanValue.startsWith("preview-snaps/") || cleanValue.startsWith("../../preview-snaps/")) {
         console.warn(`  Warning: optional asset missing from ${relativeHtmlPath}: ${cleanValue}`);
       } else {
         missing.push(`Missing local asset from ${relativeHtmlPath}: ${cleanValue}`);

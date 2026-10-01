@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+      name="description"
+      content="《CUDA Programming for NVIDIA H100s》第 8 课：算术强度、warp 专用化（warp specialization）、循环缓冲、协作与 ping-pong 流水线、持久调度（persistent scheduling）、Stream-K、集群与 epilogue（收尾阶段）设计。"
+    >
+    <meta name="theme-color" content="#08111d">
+    <title>第 8 课 - 内核设计 | CUDA Programming for NVIDIA H100s</title>
+    <link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&family=Urbanist:wght@500;600;700;800&display=swap"
+      rel="stylesheet"
+    >
+    <link rel="stylesheet" href="../../styles.css">
+  </head>
+  <body class="lesson-view lesson-view-kernel-design">
+    <header class="site-header">
+      <a class="header-mark" href="../../index.html#top" aria-label="CUDA Programming for NVIDIA H100s">
+        <span>Prateek Shukla</span>
+        <span>CUDA Programming for NVIDIA H100s</span>
+      </a>
+      <button
+        class="nav-toggle"
+        type="button"
+        aria-expanded="false"
+        aria-controls="site-nav"
+        aria-label="打开导航"
+      >
+        <span class="nav-toggle-label">菜单</span>
+        <span class="nav-toggle-icon" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
+        </span>
+      </button>
+      <nav class="site-nav" id="site-nav" aria-label="课程导航">
+        <a href="#overview">概览</a>
+        <a href="#compute">计算受限</a>
+        <a href="#pipeline">流水线</a>
+        <a href="#architectures">架构</a>
+        <a href="#scheduling">调度</a>
+        <a href="#epilogue">收尾阶段</a>
+        <a href="../../index.html#explore">探索</a>
+        <a class="lang-switch" href="../lesson-8.html" lang="en" hreflang="en" aria-label="Switch to English version">English</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="lesson-hero">
+        <div class="section-shell lesson-hero-grid">
+          <div class="lesson-hero-copy">
+            <p class="hero-credit">课程导览 / 第 08 课</p>
+            <h1 class="lesson-hero-title">内核设计</h1>
+            <p class="lesson-hero-summary">
+              第 8 课从单个 Hopper 原语拉远到整个 kernel。问题变成了利用率：判断瓶颈到底是计算还是搬运、塑造
+              warp 角色、确定循环缓冲（circular buffer）的尺寸、在协作（cooperative）与 ping-pong
+              流水线（pipeline）之间做选择、以常驻（persistent）方式调度 tile，以及设计一个不会抵消主循环成果的收尾阶段（epilogue）。
+            </p>
+            <div class="lesson-chip-list" aria-label="第 8 课主题">
+              <span class="lesson-chip">算术强度（Arithmetic Intensity）</span>
+              <span class="lesson-chip">Warp 专用化（Warp Specialization）</span>
+              <span class="lesson-chip">Ping-Pong</span>
+              <span class="lesson-chip">Stream-K</span>
+              <span class="lesson-chip">收尾阶段（Epilogue）</span>
+            </div>
+            <div class="hero-actions">
+              <a
+                class="button button-primary"
+                href="../../H100-Course/slides/8. Kernel Design.pdf"
+                target="_blank"
+                rel="noreferrer"
+              >
+                打开幻灯片
+              </a>
+              <a class="button button-secondary" href="../../index.html#explore">返回探索</a>
+            </div>
+          </div>
+
+          <aside class="lesson-meta-card" data-reveal>
+            <p class="lesson-meta-eyebrow">本课的重要性</p>
+            <h2>这些原语最终变成了一个调度问题。</h2>
+            <p>
+              到本课为止，课程已经引入了屏障（barrier）、TMA、<code>cp.async.bulk</code> 和 WGMMA。kernel
+              设计就是把它们编排成一套可复用的利用率策略的地方：谁加载、谁计算、谁存储、哪些操作保持在途（in flight）、下一个 tile 归哪个 CTA 所有。
+            </p>
+            <dl class="lesson-facts">
+              <div>
+                <dt>课程位置</dt>
+                <dd>第 08 课，共 10 课</dd>
+              </div>
+              <div>
+                <dt>核心转变</dt>
+                <dd>性能不再关乎单个原语，而变成一种流水线架构。</dd>
+              </div>
+              <div>
+                <dt>配套幻灯片</dt>
+                <dd><code>8. Kernel Design.pdf</code></dd>
+              </div>
+              <div>
+                <dt>代码锚点</dt>
+                <dd><code>sm90_gemm_tma_warpspecialized_pingpong.hpp</code> 与 <code>sm90_tile_scheduler_stream_k.hpp</code></dd>
+              </div>
+            </dl>
+          </aside>
+        </div>
+      </section>
+
+      <section class="lesson-body">
+        <div class="section-shell lesson-layout">
+          <aside class="lesson-sidebar">
+            <div class="lesson-sidebar-card">
+              <p class="section-kicker">本页内容</p>
+              <nav class="lesson-side-nav" aria-label="第 8 课小节">
+                <a href="#overview">判别瓶颈</a>
+                <a href="#compute">warp 专用化与寄存器</a>
+                <a href="#pipeline">循环缓冲与屏障</a>
+                <a href="#architectures">协作 vs ping-pong</a>
+                <a href="#scheduling">常驻调度与 Stream-K</a>
+                <a href="#epilogue">收尾阶段交接</a>
+                <a href="#continue">继续课程</a>
+              </nav>
+            </div>
+
+            <div class="lesson-sidebar-card">
+              <p class="section-kicker">关键要点</p>
+              <ul class="lesson-mini-list">
+                <li>算术强度告诉你该先追求计算吞吐量还是数据搬运。</li>
+                <li>Warp 专用化加分级屏障，是 Hopper kernel 同时扛住寄存器压力与内存延迟的方法。</li>
+                <li>Ping-pong、协作、常驻调度、Stream-K 与收尾阶段策略，全都是利用率层面的决策。</li>
+              </ul>
+            </div>
+
+            <div class="lesson-sidebar-card">
+              <p class="section-kicker">配套链接</p>
+              <a class="lesson-text-link" href="lesson-7.html">返回第 7 课</a>
+              <a class="lesson-text-link" href="lesson-8.1.html">打开第 8.1 课</a>
+              <a class="lesson-text-link" href="lesson-8.2.html">打开第 8.2 课</a>
+              <a class="lesson-text-link" href="../../files/sm90_gemm_tma_warpspecialized_pingpong.hpp" target="_blank" rel="noreferrer">打开 Ping-Pong 主循环</a>
+              <a class="lesson-text-link" href="../../files/sm90_gemm_tma_warpspecialized_cooperative.hpp" target="_blank" rel="noreferrer">打开协作主循环</a>
+              <a class="lesson-text-link" href="../../files/sm90_tile_scheduler_stream_k.hpp" target="_blank" rel="noreferrer">打开 Stream-K 调度器</a>
+              <a class="lesson-text-link" href="../../files/sm90_epilogue_tma_warpspecialized.hpp" target="_blank" rel="noreferrer">打开 TMA Epilogue 锚点</a>
+            </div>
+          </aside>
+
+          <article class="lesson-article">
+            <section class="lesson-chapter" id="overview" data-reveal>
+              <h2>在设计 kernel 之前先判别瓶颈</h2>
+              <p>
+                讲义从第一性原理出发：CUDA kernel 要么主要受计算吞吐量限制，要么主要受数据搬运限制。算术强度是判据：
+                <code>AI = FLOPs / bytes moved</code>。若该值低于硬件脊点（ridge point），kernel 是内存受限（memory-bound）的；若高于脊点，kernel
+                是计算受限（compute-bound）的。
+              </p>
+              <table class="lesson-table" aria-label="kernel 分类指南">
+                <thead>
+                  <tr>
+                    <th>状态</th>
+                    <th>主要症状</th>
+                    <th>首先优化什么</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>内存受限</td>
+                    <td>执行被搬运的字节数而非数学指令发射所限制。</td>
+                    <td>降低流量、局部性、缓存行为，以及搬运重叠。</td>
+                  </tr>
+                  <tr>
+                    <td>计算受限</td>
+                    <td>张量核心（tensor core）或算术发射才是真正的限制者。</td>
+                    <td>寄存器压力、WGMMA 发射密度、流水线深度，以及收尾阶段重叠。</td>
+                  </tr>
+                </tbody>
+              </table>
+              <p>
+                幻灯片给出了具体的脊点直觉：FP16 张量运算约为 <code>295 FLOP / byte</code>，FP32 CUDA core
+                工作约为 <code>20 FLOP / byte</code>。这正是本课主要围绕 Hopper GEMM
+                展开的原因：它们是高算术强度 kernel，其瓶颈更多转向寄存器文件压力、WGMMA 发射速率和调度，而不是单纯的字节流量。
+              </p>
+            </section>
+
+            <section class="lesson-chapter" id="compute" data-reveal>
+              <h2>计算受限 kernel 的生死取决于 warp 专用化与寄存器策略</h2>
+              <p>
+                Hopper 上的计算受限 kernel 由强复用和生产者（producer）-消费者（consumer）失衡定义。生产者 warp
+                经常停在屏障上等待消费者，因为真正的压力在计算路径上：累加器、操作数片段、发射节奏，以及让一个大输出 tile
+                常驻所需的寄存器（register）数量。
+              </p>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3>生产者 warp</h3>
+                  <p>
+                    通常一个 warpgroup 就够了。生产者主要负责发起 TMA 拷贝、管理屏障，并保持寄存器占用精简。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>消费者 warp</h3>
+                  <p>
+                    消费者携带累加器 tile 并驱动 WGMMA。寄存器压力正是在这里爆炸，这也是讲义把一到两个消费者 warpgroup
+                    视为主要设计选择的原因。
+                  </p>
+                </article>
+              </div>
+              <h3><code>setmaxnreg</code> 把这种不对称显式化</h3>
+              <p>
+                本课强调 <code>setmaxnreg</code> 是一条能让不同 warp
+                角色在执行期间申请不同寄存器预算的指令。生产者可以保持在最小值附近，而消费者申请 MMA 密集段所需的更大配额。
+              </p>
+              <table class="lesson-table" aria-label="warp 专用化设计选择">
+                <thead>
+                  <tr>
+                    <th>设计选择</th>
+                    <th>存在的原因</th>
+                    <th>典型后果</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>单个生产者 warpgroup</td>
+                    <td>单个发射线程就能发起大规模由 TMA 支撑的数据搬运。</td>
+                    <td>让加载侧开销保持很小，把资源留给计算。</td>
+                  </tr>
+                  <tr>
+                    <td>一到两个消费者 warpgroup</td>
+                    <td>累加器 tile 决定每个 warpgroup 能装下多少计算状态。</td>
+                    <td>决定了在基础/ping-pong 与协作流水线之间如何选择。</td>
+                  </tr>
+                  <tr>
+                    <td>中等占用率（occupancy）、高寄存器密度</td>
+                    <td>只要让张量核心持续有活干，计算受限 kernel 不需要最大占用率。</td>
+                    <td>寄存器预算变得比纯粹的线程块数量更重要。</td>
+                  </tr>
+                </tbody>
+              </table>
+              <div class="lesson-note">
+                <p>
+                  <strong>心智模型：</strong>warp 专用化不只是分支清理。它是把一个 Hopper GEMM
+                  的活跃状态塞进寄存器文件、同时不把全部收益溢出掉的手段。
+                </p>
+              </div>
+            </section>
+
+            <section class="lesson-chapter" id="pipeline" data-reveal>
+              <h2>循环缓冲是让重叠真正落地的物理结构</h2>
+              <p>
+                本课把流水线化归结为一个想法：当 tile <code>N</code> 正在被计算时，tile <code>N + 1</code>
+                必须已经在路上。共享内存（shared memory）变成一个由固定数量 stage 组成的环，生产者负责填充，消费者以轮转方式排空。
+              </p>
+              <pre class="lesson-pre"><code>Producer waits EMPTY  -&gt; declares expected bytes on FULL
+Producer issues TMA   -&gt; hardware signals FULL on completion
+Consumer waits FULL   -&gt; issues WGMMA from that stage
+Consumer waits oldest -&gt; arrives EMPTY to release the stage</code></pre>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3>FULL 屏障</h3>
+                  <p>
+                    消费者在读取一个 stage 之前在这里等待。在 TMA 流水线中，它与真实的传输完成挂钩，而不只是一个软件标志。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>EMPTY 屏障</h3>
+                  <p>
+                    生产者在复用一个 stage 之前在这里等待。只有当触及该 stage 的最旧 WGMMA 确认完成后，消费者才会释放它。
+                  </p>
+                </article>
+              </div>
+              <p>
+                相位位（phase bit）是让这个环在回绕（wrap-around）之后依然安全的关键。stage 索引会重复。phase bit
+                在回绕时翻转，因此“stage 0 已满”可以被区分为环形缓冲的上一轮还是新一轮。
+              </p>
+              <h3>前奏（prologue）、稳态、排空（drain）</h3>
+              <ol>
+                <li><strong>前奏（prologue）：</strong>在释放任何东西之前，先用初始 WGMMA 工作填满流水线。</li>
+                <li><strong>稳态：</strong>等待数据、发射 WGMMA、等待最旧的在途 group、释放最旧的 stage、前进。</li>
+                <li><strong>排空（drain）：</strong>以 <code>warpgroup_wait&lt;0&gt;()</code> 收尾，然后释放剩余的 stage，让生产者能够干净地退出。</li>
+              </ol>
+            </section>
+
+            <section class="lesson-chapter" id="architectures" data-reveal>
+              <h2>协作与 ping-pong 流水线解决的是不同的利用率问题</h2>
+              <p>
+                两种架构使用相同的核心要素：一个生产者 warpgroup、若干消费者 warpgroup、循环的共享内存 stage，以及由屏障支撑的重叠。区别在于第二个消费者
+                warpgroup 被花在哪里。
+              </p>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3>协作流水线</h3>
+                  <p>
+                    两个消费者 warpgroup 处理同一个输出 tile。这带来了更大的有效 CTA tile，因为每个 warpgroup
+                    拥有一段互不重叠的 M 区域；但张量核心会在收尾阶段闲置。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>Ping-pong 流水线</h3>
+                  <p>
+                    Consumer 0 和 Consumer 1 交替处理 tile。当一个在跑收尾阶段时，另一个在跑下一个 tile 的 WGMMA
+                    主循环。这就是把收尾阶段与张量核心工作重叠起来的设计。
+                  </p>
+                </article>
+              </div>
+              <table class="lesson-table" aria-label="流水线架构对比">
+                <thead>
+                  <tr>
+                    <th>架构</th>
+                    <th>最适用的场景</th>
+                    <th>主要权衡</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>协作</td>
+                    <td>你需要的输出 tile 大到单个 warpgroup 的寄存器装不下。</td>
+                    <td>收尾阶段时间无法被并发的 WGMMA 隐藏。</td>
+                  </tr>
+                  <tr>
+                    <td>Ping-pong</td>
+                    <td>收尾阶段重叠至关重要，且 K 足够大、能让交替的消费者都忙起来。</td>
+                    <td>协调逻辑更复杂，尤其是围绕有序屏障（ordered barrier）与收尾阶段交接的部分。</td>
+                  </tr>
+                </tbody>
+              </table>
+              <h3>集群扩展了数据共享半径</h3>
+              <p>
+                讲义主要把线程块集群（thread block cluster）当作 WGMMA kernel 的加载侧优化。需要同一个 A 或 B tile
+                的相邻 CTA 可以使用 TMA 多播（multicast），让一次全局内存（global memory）读取扇出到集群内各线程块的本地共享内存中。<code>(1, 2)</code> 或
+                <code>(2, 1)</code> 这类典型形状更受青睐，因为同一个 TPC 内相邻线程块之间的通信尤其高效。
+              </p>
+            </section>
+
+            <section class="lesson-chapter" id="scheduling" data-reveal>
+              <h2>常驻调度决定下一个 tile 归谁以及 fixup 如何发生</h2>
+              <p>
+                调度不只是启动几何形状。它是随时间把 tile 坐标映射到执行单元上的策略。Hopper kernel
+                频繁使用常驻调度（persistent scheduling），让一个更小的 grid 常驻并循环处理大量工作 tile，而不是每次都付出完整的非常驻调度尾部代价。
+              </p>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3>常驻 tile</h3>
+                  <p>
+                    一个 CTA 领取一串 tile，保持其角色分配与流水线状态存活，从而避免一次性线程块调度最糟的尾部效应。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>Stream-K</h3>
+                  <p>
+                    工作可以沿 K 维分解，让多个 CTA 为同一个输出 tile 贡献部分和，然后通过一次归约（reduction）和收尾阶段所有权规则把结果
+                    fixup（修复合并）到一起。
+                  </p>
+                </article>
+              </div>
+              <p>
+                本仓库中的 Stream-K 调度器用一个工作单元把这一点显式化：它跟踪 <code>M_idx</code>、<code>N_idx</code>、<code>L_idx</code>、<code>K_idx</code> 和
+                <code>k_tile_count</code>。这些字段告诉 CTA 它的切分从哪里开始，以及它拥有 K 维的多少。
+              </p>
+              <table class="lesson-table" aria-label="Stream-K 角色划分">
+                <thead>
+                  <tr>
+                    <th>角色</th>
+                    <th>判定条件</th>
+                    <th>职责</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>首个切分</td>
+                    <td><code>K_idx == 0</code></td>
+                    <td>在 workspace 中初始化部分结果。</td>
+                  </tr>
+                  <tr>
+                    <td>中间切分</td>
+                    <td><code>0 &lt; K_idx</code> 且非最后一段</td>
+                    <td>归约进已有的 workspace 状态。</td>
+                  </tr>
+                  <tr>
+                    <td>最后切分</td>
+                    <td><code>K_idx + k_tile_count == k_tiles_per_output_tile</code></td>
+                    <td>负责该输出 tile 的最终 fixup 与收尾阶段。</td>
+                  </tr>
+                </tbody>
+              </table>
+              <p>
+                讲义还强调分组（grouping）是叠加在 Stream-K 之上的一种 L2 局部性优化。与其用一个完全全局的 stream-K
+                工作池，不如按组划分工作，让协作的 CTA 更贴近输出空间中的同一区域，并共享更多有用的缓存状态。
+              </p>
+            </section>
+
+            <section class="lesson-chapter" id="epilogue" data-reveal>
+              <h2>收尾阶段本身就是一条流水线，而非事后补丁</h2>
+              <p>
+                输出 tile 通常太大，无法一步从寄存器倾倒到全局内存。Hopper 的收尾阶段把 tile 切成子块（subtile），可选地加载源张量
+                C，在寄存器中应用逐元素或缩放逻辑，把转换后的结果拷贝进共享内存，然后对完成的子块发起 TMA store。
+              </p>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3>寄存器到共享内存</h3>
+                  <p>
+                    消费者在类型转换之后把每个子块写入共享内存。当 C 和 D 的元素宽度相同时，同一批共享内存缓冲可以在加载与存储两个阶段之间复用。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>共享内存到全局内存</h3>
+                  <p>
+                    一条跨 proxy 栅栏（cross-proxy fence）加 <code>bar.sync</code>
+                    让整个子块在 TMA store 发起之前完全可见，而存储流水线可以让一个子块的写入与下一个子块上的工作重叠。
+                  </p>
+                </article>
+              </div>
+              <p>
+                在 ping-pong 设计中，交接更加结构化。一个消费者的收尾阶段必须与另一个消费者的 MMA 共存。本课描述了一个 2x2
+                有序屏障网格：一行用于 MMA 交接，一行用于收尾阶段交接。正是它让两个消费者得以交替进行，而不会破坏共享内存或让张量核心挨饿。
+              </p>
+              <div class="lesson-note">
+                <p>
+                  <strong>重要的克制：</strong>并非每个后处理操作都该塞进收尾阶段。讲义明确指出，像 layer norm 或 softmax
+                  这类跨 tile 归约通常需要一个真正的 kernel 边界，目标变成让这次交接足够便宜，而不是假装它总能被融合掉。
+                </p>
+              </div>
+            </section>
+
+            <section class="lesson-chapter" id="continue" data-reveal>
+              <h2>继续课程</h2>
+              <p>
+                第 8 课把 Hopper 原语组装成完整的 kernel 机制。接下来两讲补充仍留在 kernel 层内：先是用于尾部均衡的
+                Stream-K，然后是用于依赖 grid 之间交接的 kernel 启动控制；此后课程才走向多 GPU 系统。
+              </p>
+              <div class="lesson-resource-grid">
+                <a class="lesson-resource-card" href="lesson-8.1.html">
+                  <span class="lesson-resource-label">下一课</span>
+                  <h3>Stream-K</h3>
+                  <p>继续进入 split-K 工作单元、fixup、锁，以及直接瞄准尾部波的调度器逻辑。</p>
+                </a>
+                <a class="lesson-resource-card" href="lesson-8.2.html">
+                  <span class="lesson-resource-label">接着</span>
+                  <h3>Kernel 启动</h3>
+                  <p>跟随交接进入 launch bounds、依赖 grid、程序化 stream 串行化与启动窗口调优。</p>
+                </a>
+                <a class="lesson-resource-card" href="../../files/sm90_gemm_tma_warpspecialized_pingpong.hpp" target="_blank" rel="noreferrer">
+                  <span class="lesson-resource-label">代码锚点</span>
+                  <h3>Ping-Pong 主循环</h3>
+                  <p>在本仓库的 SM90 ping-pong kernel 中看到有序的数学 warpgroup、常驻 tile 迭代与收尾阶段重叠。</p>
+                </a>
+                <a class="lesson-resource-card" href="lesson-9.html">
+                  <span class="lesson-resource-label">之后</span>
+                  <h3>多 GPU 第 1 部分</h3>
+                  <p>从 kernel 利用率进入 NVLink、NVSwitch、rails 与大规模 H100 训练任务背后的系统级互连结构。</p>
+                </a>
+              </div>
+            </section>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <nav class="footer-nav" aria-label="页脚">
+        <a href="../../index.html#top">首页</a>
+        <a href="../../index.html#lessons">课程</a>
+        <a href="../../index.html#explore">探索</a>
+        <a href="../../index.html#visuals">可视化</a>
+        <a href="../../slides.html">幻灯片</a>
+      </nav>
+      <p>CUDA Programming for NVIDIA H100s</p>
+      <p>Prateek Shukla</p>
+    </footer>
+
+    <script src="../../script.js"></script>
+  </body>
+</html>

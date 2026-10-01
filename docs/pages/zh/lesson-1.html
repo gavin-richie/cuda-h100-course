@@ -1,0 +1,495 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="description" content="学习 H100 架构、内存层级、张量核心，以及改变现代 CUDA kernel 设计方式的 Hopper 异步执行模型。">
+<meta name="theme-color" content="#08111d">
+        <title>第 1 课 - H100 简介 | CUDA Programming for NVIDIA H100s</title>
+    <link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&family=Urbanist:wght@500;600;700;800&display=swap"
+      rel="stylesheet"
+    >
+    <link rel="stylesheet" href="../../styles.css">
+  <!-- SEO:BEGIN -->
+    <meta name="author" content="Prateek Shukla">
+    <meta name="robots" content="index, follow, max-image-preview:large">
+    <link rel="canonical" href="https://cudacourseh100.github.io/pages/zh/lesson-1.html">
+    <meta property="og:locale" content="zh_CN">
+    <link rel="alternate" hreflang="en" href="https://cudacourseh100.github.io/pages/zh/lesson-1.html">
+    <link rel="alternate" hreflang="zh-CN" href="https://cudacourseh100.github.io/pages/zh/zh/lesson-1.html">
+    <link rel="alternate" hreflang="x-default" href="https://cudacourseh100.github.io/pages/zh/lesson-1.html">
+    <meta property="og:locale:alternate" content="en_US">
+    <meta property="og:site_name" content="CUDA Programming for NVIDIA H100s">
+    <meta property="og:type" content="article">
+    <meta property="og:title" content="H100 简介 | 第 1 课">
+    <meta property="og:description" content="学习 H100 架构、内存层级、张量核心，以及改变现代 CUDA kernel 设计方式的 Hopper 异步执行模型。">
+    <meta property="og:url" content="https://cudacourseh100.github.io/pages/zh/lesson-1.html">
+    <meta property="og:image" content="https://cudacourseh100.github.io/social-card.png">
+    <meta property="og:image:type" content="image/png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="CUDA Programming for NVIDIA H100s">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="H100 简介 | 第 1 课">
+    <meta name="twitter:description" content="学习 H100 架构、内存层级、张量核心，以及改变现代 CUDA kernel 设计方式的 Hopper 异步执行模型。">
+    <meta name="twitter:image" content="https://cudacourseh100.github.io/social-card.png">
+    <meta name="twitter:image:alt" content="CUDA Programming for NVIDIA H100s">
+    <meta property="article:author" content="Prateek Shukla">
+    <meta property="article:section" content="Hopper 架构">
+    <meta property="article:tag" content="H100">
+    <meta property="article:tag" content="Hopper 架构">
+    <meta property="article:tag" content="内存层级">
+    <meta property="article:tag" content="张量核心">
+    <meta property="article:tag" content="异步执行">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "TechArticle",
+          "@id": "https://cudacourseh100.github.io/pages/zh/lesson-1.html#article",
+          "url": "https://cudacourseh100.github.io/pages/zh/lesson-1.html",
+          "headline": "H100 简介",
+          "name": "H100 简介",
+          "description": "学习 H100 架构、内存层级、张量核心，以及改变现代 CUDA kernel 设计方式的 Hopper 异步执行模型。",
+          "inLanguage": "zh-CN",
+          "author": {
+            "@type": "Person",
+            "@id": "https://cudacourseh100.github.io/#person",
+            "name": "Prateek Shukla",
+            "url": "https://cudacourseh100.github.io/"
+          },
+          "mainEntityOfPage": "https://cudacourseh100.github.io/pages/zh/lesson-1.html",
+          "articleSection": "Hopper 架构",
+          "about": [
+            "H100",
+            "Hopper 架构",
+            "内存层级",
+            "张量核心",
+            "异步执行"
+          ],
+          "isPartOf": {
+            "@type": "Course",
+            "name": "CUDA Programming for NVIDIA H100s",
+            "url": "https://cudacourseh100.github.io/"
+          }
+        },
+        {
+          "@type": "BreadcrumbList",
+          "itemListElement": [
+            {
+              "@type": "ListItem",
+              "position": 1,
+              "name": "Home",
+              "item": "https://cudacourseh100.github.io/"
+            },
+            {
+              "@type": "ListItem",
+              "position": 2,
+              "name": "H100 简介",
+              "item": "https://cudacourseh100.github.io/pages/zh/lesson-1.html"
+            }
+          ]
+        }
+      ]
+    }
+    </script>
+    <!-- SEO:END -->
+  </head>
+  <body class="lesson-view lesson-view-architecture">
+    <header class="site-header">
+      <a class="header-mark" href="../../index.html#top" aria-label="CUDA Programming for NVIDIA H100s">
+        <span>Prateek Shukla</span>
+        <span>CUDA Programming for NVIDIA H100s</span>
+      </a>
+      <button
+        class="nav-toggle"
+        type="button"
+        aria-expanded="false"
+        aria-controls="site-nav"
+        aria-label="打开导航"
+      >
+        <span class="nav-toggle-label">菜单</span>
+        <span class="nav-toggle-icon" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
+        </span>
+      </button>
+      <nav class="site-nav" id="site-nav" aria-label="课程导航">
+        <a href="#overview">概览</a>
+        <a href="#async">异步模型</a>
+        <a href="#memory">内存</a>
+        <a href="#execution">执行</a>
+        <a href="#takeaways">要点</a>
+        <a href="../../index.html#explore">探索</a>
+        <a class="lang-switch" href="../lesson-1.html" lang="en" hreflang="en" aria-label="Switch to English version">English</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="lesson-hero">
+        <div class="section-shell lesson-hero-grid">
+          <div class="lesson-hero-copy">
+            <p class="hero-credit">课程导览 / 第 01 课</p>
+            <h1 class="lesson-hero-title">H100 简介</h1>
+            <p class="lesson-hero-summary">
+              Hopper 不只是一个更大的吞吐量数字。它是一台围绕重叠（overlap）构建的机器：异步搬运、专用执行路径、激进的数据暂存，以及一套只有当你看清内存与计算如何相互供给时才真正发挥作用的层级结构。
+            </p>
+            <div class="lesson-chip-list" aria-label="第 1 课主题">
+              <span class="lesson-chip">Hopper</span>
+              <span class="lesson-chip">TMA</span>
+              <span class="lesson-chip">内存层级</span>
+              <span class="lesson-chip">张量核心</span>
+              <span class="lesson-chip">SMSPs</span>
+            </div>
+            <div class="hero-actions">
+              <a
+                class="button button-primary"
+                href="../../H100-Course/slides/1. Introduction to H100.pdf"
+                target="_blank"
+                rel="noreferrer"
+              >
+                打开幻灯片
+              </a>
+              <a class="button button-secondary" href="../../index.html#explore">返回探索</a>
+            </div>
+          </div>
+
+          <aside class="lesson-meta-card" data-reveal>
+            <p class="lesson-meta-eyebrow">本页用途</p>
+            <h2>先把 Hopper 当作一台机器来读，再把它当作 kernel 的目标来读。</h2>
+            <p>
+              第 1 课建立了这门课其余部分所依赖的心智模型（mental model）：数据在哪里、工作如何被发射（issue）、重叠为什么重要，以及为什么后面诸如 TMA 与 WGMMA 这样的原语是架构的必然结果，而不是彼此脱节的技巧。
+            </p>
+            <dl class="lesson-facts">
+              <div>
+                <dt>课程位置</dt>
+                <dd>第 01 课，共 10 课</dd>
+              </div>
+              <div>
+                <dt>核心转变</dt>
+                <dd>发射与完成不再是同一个心理事件。</dd>
+              </div>
+              <div>
+                <dt>配套幻灯片</dt>
+                <dd><code>1. Introduction to H100.pdf</code></dd>
+              </div>
+              <div>
+                <dt>下一课</dt>
+                <dd>线程块集群（clusters）、DSMEM、内联 PTX 与地址空间。</dd>
+              </div>
+            </dl>
+          </aside>
+        </div>
+      </section>
+
+      <section class="lesson-body">
+        <div class="section-shell lesson-layout">
+          <aside class="lesson-sidebar">
+            <div class="lesson-sidebar-card">
+              <p class="section-kicker">本页内容</p>
+              <nav class="lesson-side-nav" aria-label="第 1 课小节">
+                <a href="#overview">H100 是什么</a>
+                <a href="#specs">关键规格</a>
+                <a href="#async">异步执行</a>
+                <a href="#memory">内存层级</a>
+                <a href="#execution">SM、warp 与张量核心</a>
+                <a href="#takeaways">优化要点</a>
+                <a href="#continue">继续学习本课程</a>
+              </nav>
+            </div>
+
+            <div class="lesson-sidebar-card">
+              <p class="section-kicker">关键要点</p>
+              <ul class="lesson-mini-list">
+                <li>Hopper 的性能关键在于喂饱计算，而不只是发射更多的数学运算。</li>
+                <li>只有先看清内存路径与执行层级，TMA 和 WGMMA 才说得通。</li>
+                <li>寄存器、共享内存、L2 与 warp 调度才构成真正的优化面。</li>
+              </ul>
+            </div>
+
+            <div class="lesson-sidebar-card">
+              <p class="section-kicker">配套链接</p>
+              <a class="lesson-text-link" href="../../slides.html">浏览全部幻灯片</a>
+              <a class="lesson-text-link" href="../../index.html#code">跳转到代码锚点</a>
+              <a class="lesson-text-link" href="lesson-2.html">打开第 2 课</a>
+            </div>
+          </aside>
+
+          <article class="lesson-article">
+            <section class="lesson-chapter" id="overview" data-reveal>
+              <h2>H100 是什么</h2>
+              <p>
+                NVIDIA H100 是面向大规模 AI 训练、推理、HPC 与数据分析构建的 Hopper 代数据中心 GPU。它在这门课中重要的原因并不只是比旧 GPU 更快。Hopper 把异步搬运、专用数据通路和重叠优先的执行变成了常规编程实践的一部分，从而改变了高性能 kernel 的组织方式。
+              </p>
+              <p>
+                因此，正确的心智模型与其说像"又一块 CUDA 设备"，不如说像"一台拥有多个内存层级与显式暂存区域的机器，它的执行硬件会奖励这样一种做法：在当前 tile 仍在干活时，就让下一个 tile 已经在路上"。
+              </p>
+              <div class="lesson-note">
+                <p>
+                  <strong>可操作的心智模型：</strong>H100 的性能来自让正确的数学路径（张量核心 vs. 普通核心）、正确的数据路径（TMA、缓存、共享内存、寄存器）与正确的执行策略（让内存搬运与计算重叠）相互匹配。
+                </p>
+              </div>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3>Transformer 密集型工作负载</h3>
+                  <p>
+                    Hopper 增加了专用的 Transformer Engine 和更强的低精度数学路径，尤其是 FP8，因为现代训练与推理工作负载由稠密张量运算主导。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>重叠优于阻塞</h3>
+                  <p>
+                    这种架构会奖励在当前 tile 仍在处理时就取回下一个 tile 的做法，这改变了 kernel 的设计、调度与同步方式。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>处处专用化</h3>
+                  <p>
+                    TMA、张量核心、LSU、SFU 和调度器各自掌管吞吐量故事中不同的一块。最好的 kernel 会有意地把工作路由到这些路径上。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>扩展到单 GPU 之外</h3>
+                  <p>
+                    NVLink 和 NVSwitch 之所以重要，是因为前沿工作负载都是分布式的。这门课把这种系统背景视为架构的一部分，而不是可有可无的附录。
+                  </p>
+                </article>
+              </div>
+            </section>
+
+            <section class="lesson-chapter" id="specs" data-reveal>
+              <h2>关键规格</h2>
+              <p>
+                具体数字因 SKU 和形态而异，但课程材料用这些数字来锚定工程讨论。
+              </p>
+              <table class="lesson-table" aria-label="H100 关键规格">
+                <thead>
+                  <tr>
+                    <th>类别</th>
+                    <th>细节</th>
+                    <th>为什么重要</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>架构</td>
+                    <td>Hopper</td>
+                    <td>引入更强的异步搬运、Transformer Engine 支持以及新的张量核心路径。</td>
+                  </tr>
+                  <tr>
+                    <td>内存</td>
+                    <td>80 GB HBM3，课程幻灯片中约为 3.35 TB/s</td>
+                    <td>高带宽是在不饿死计算的前提下喂饱矩阵密集型 AI 工作负载的关键。</td>
+                  </tr>
+                  <tr>
+                    <td>SM 数量</td>
+                    <td>课程材料中为 132 个流式多处理器（streaming multiprocessor）</td>
+                    <td>SM 是运行线程块并暴露内存与数学层级的执行面。</td>
+                  </tr>
+                  <tr>
+                    <td>张量核心</td>
+                    <td>共 528 个，按课程的讲法每个 SM 4 个</td>
+                    <td>它们是稠密矩阵乘累加（matrix multiply-accumulate）运算的快速路径。</td>
+                  </tr>
+                  <tr>
+                    <td>L2 缓存</td>
+                    <td>50 MB</td>
+                    <td>L2 在 SM 与 HBM 之间调和流量，抚平数据流并减少浪费的带宽。</td>
+                  </tr>
+                  <tr>
+                    <td>互连</td>
+                    <td>第 4 代 NVLink 支持，外加 NVSwitch 平台背景</td>
+                    <td>对把训练系统扩展到单个加速器之外至关重要。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </section>
+
+            <section class="lesson-chapter" id="async" data-reveal>
+              <h2>异步执行是第一个真正的转变</h2>
+              <p>
+                课程立刻强调了最大的概念转变：Hopper 的设计目标是通过把请求与完成解耦来让计算保持忙碌。每个 SM 都包含一个张量内存加速器（TMA），这很重要，因为它把张量形状的数据搬运从主执行资源上卸载了出去。
+              </p>
+              <h3>同步拷贝 vs. 异步拷贝</h3>
+              <p>
+                同步拷贝会阻塞发射它的线程或 warp，直到传输完成。这很容易推理，但只要内存延迟占主导，它就在浪费发射带宽。异步拷贝则是启动传输，然后让其他有用的工作继续进行，数据在后台搬运。
+              </p>
+              <p>
+                这正是流水线化 kernel 成为可能的原因。tile <code>i</code> 在计算时，tile
+                <code>i+1</code> 已经在路上，这正是后面几课围绕 TMA、屏障（barrier）与 WGMMA 构建出来的模式。
+              </p>
+              <h3>TMA 为什么重要</h3>
+              <ul>
+                <li>它降低了从全局内存到共享内存搬运的每线程开销。</li>
+                <li>它在硬件中处理形状、步长（stride）与边界行为，而不是强迫你写标量化（scalarized）的搬运逻辑。</li>
+                <li>它为真正的数学运算释放出更多 SM 执行带宽。</li>
+                <li>它让 GEMM 风格 kernel 的生产者/消费者（producer/consumer）流水线更干净、更可扩展。</li>
+              </ul>
+              <div class="lesson-note">
+                <p>
+                  <strong>权衡：</strong>异步系统增加了簿记复杂度。你需要推理数据暂存、依赖点，以及数据何时才安全可消费。
+                </p>
+              </div>
+            </section>
+
+            <section class="lesson-chapter" id="memory" data-reveal>
+              <h2>内存层级才是真正的流水线</h2>
+              <p>
+                理解 H100 内存的一种实用方式，是把它看作一条分阶段的路径：
+                <strong>HBM3 -&gt; L2 缓存 -&gt; L1/共享内存 -&gt; 寄存器。</strong>性能取决于是否高效地把数据沿这条层级向下搬运，并尽量减少 kernel 被迫支付片外成本的次数。
+              </p>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3>HBM3</h3>
+                  <p>
+                    片外设备内存，容量大、带宽巨大，但延迟和能耗成本仍远高于片上存储。合并（coalescing）与访问规律性依然重要。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>L2 缓存</h3>
+                  <p>
+                    一个位于 SM 与 HBM 之间、由大家共享的 50 MB 流量管理器。它能吸收杂乱的访问，并把它们重组为更高效的内存事务。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>共享内存 + L1</h3>
+                  <p>
+                    片上暂存区域，tile 在计算期间就存放在这里。它按 bank 划分、容量受限，是高性能 kernel 中最宝贵的资源之一。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>寄存器</h3>
+                  <p>
+                    每线程最快的存储，也是常见的瓶颈。寄存器太多会降低占用率（occupancy），并可能把值溢出（spill）到更慢的内存。
+                  </p>
+                </article>
+              </div>
+              <h3>每一层改变什么</h3>
+              <ul>
+                <li>HBM 带宽很重要，但你能真正拿到多少，仍由合并访问决定。</li>
+                <li>L2 能隐藏一些不规律性，但它不能替代刻意的布局（layout）选择。</li>
+                <li>共享内存降低延迟并支持复用，但 bank 冲突与容量权衡仍是核心问题。</li>
+                <li>寄存器压力可能悄悄减少活跃 warp 数量，足以拖累性能。</li>
+              </ul>
+            </section>
+
+            <section class="lesson-chapter" id="execution" data-reveal>
+              <h2>SM、张量核心、warp 与分发</h2>
+              <p>
+                SM 是 GPU 的核心执行单元。它运行线程块、持有本地存储，并包含真正执行指令的数学与内存单元。
+              </p>
+              <h3>张量核心与 WGMMA</h3>
+              <p>
+                Hopper 包含第四代张量核心，而最重要的编程模型变化之一是：矩阵数学不再总是单 warp 的故事。有了 WGMMA，四个 warp 协同完成一次矩阵乘累加运算，把张量核心的发射变成了一个 128 线程的协调问题。
+              </p>
+              <ul>
+                <li>矩阵 A 可以来自共享内存或寄存器，取决于具体形式。</li>
+                <li>在这门课程的讲法中，矩阵 B 通常被当作来自共享内存。</li>
+                <li>矩阵 C 的累加器以寄存器形式分布在四个 warp 上。</li>
+                <li>FP16 和 FP8 值会被打包（packing）进 32 位寄存器以供张量核心发射。</li>
+              </ul>
+              <h3>SM 的内部结构</h3>
+              <p>
+                每个 SM 包含 FP32、INT32、FP64、张量核心、LSU、SFU、寄存器、缓存、调度器和分发资源。它还被划分为四个 SMSP，每个 SMSP 拥有自己的本地发射路径。
+              </p>
+              <h3>warp 与调度器</h3>
+              <p>
+                warp 是调度器每个周期所推理的 32 线程单位。调度器使用记分板（scoreboarding）与依赖跟踪来选择就绪的 warp，而分发单元把工作送入执行流水线。这就是为什么"就绪"不只是有指令可跑。数据与流水线的可用性也必须对上。
+              </p>
+              <div class="lesson-note">
+                <p>
+                  <strong>实践含义：</strong>能干净地映射成多个 warp 的块大小，尤其是 4 个 warp 的倍数（如 128 线程），通常能更自然地在四个 SMSP 之间取得平衡。
+                </p>
+              </div>
+            </section>
+
+            <section class="lesson-chapter" id="takeaways" data-reveal>
+              <h2>优化要点</h2>
+              <ol>
+                <li><strong>围绕重叠来设计。</strong>"先加载、后计算"的串行思维会白白浪费吞吐量。</li>
+                <li><strong>有意地使用张量核心。</strong>最快路径取决于数据类型、布局与暂存选择。</li>
+                <li><strong>盯紧寄存器压力。</strong>一点点增长就可能把占用率拉低到让整个 kernel 性能倒退。</li>
+                <li><strong>把共享内存当作预算。</strong>它很强大，但过度分配会改变占用率与缓存行为。</li>
+                <li><strong>按机器来定块的大小。</strong>线程块的几何形状应当反映 warp 组织与 SM 子分区。</li>
+                <li><strong>预期到专用化。</strong>Hopper 奖励把工作路由到正确的硬件路径，而不是走泛型（generic）后备。</li>
+              </ol>
+              <h3>术语表</h3>
+              <table class="lesson-table" aria-label="H100 术语表">
+                <tbody>
+                  <tr>
+                    <th>TMA</th>
+                    <td>张量内存加速器（Tensor Memory Accelerator），对异步张量与 tile 搬运的硬件支持。</td>
+                  </tr>
+                  <tr>
+                    <th>SM</th>
+                    <td>流式多处理器（Streaming Multiprocessor），运行线程块的主执行块。</td>
+                  </tr>
+                  <tr>
+                    <th>SMSP</th>
+                    <td>SM 的子分区，拥有自己的调度器与分发资源。</td>
+                  </tr>
+                  <tr>
+                    <th>WGMMA</th>
+                    <td>Warp Group Matrix Multiply Accumulate（warp 组矩阵乘累加），由四个 warp 一起参与的张量核心发射。</td>
+                  </tr>
+                  <tr>
+                    <th>HBM3</th>
+                    <td>高带宽片外设备内存，用作 GPU 的主大容量内存层级。</td>
+                  </tr>
+                  <tr>
+                    <th>NVLink</th>
+                    <td>多 GPU 系统中使用的高带宽 GPU 互连。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </section>
+
+            <section class="lesson-chapter" id="continue" data-reveal>
+              <h2>继续学习本课程</h2>
+              <p>
+                第 1 课给出了机器的形状。第 2 课进入 Hopper 代码真正使用的机制：线程块集群、DSMEM、内联 PTX，以及让低级内存操作保持正确的指针转换。
+              </p>
+              <div class="lesson-resource-grid">
+                <a class="lesson-resource-card" href="lesson-2.html">
+                  <span class="lesson-resource-label">下一课</span>
+                  <h3>集群与 PTX</h3>
+                  <p>线程块集群、分布式共享内存、内联 PTX、状态空间与地址转换。</p>
+                </a>
+                <a class="lesson-resource-card" href="../../slides.html">
+                  <span class="lesson-resource-label">课程材料</span>
+                  <h3>全部幻灯片</h3>
+                  <p>当你想看到整段阶梯而不只是单个入口页时，浏览完整的讲座序列。</p>
+                </a>
+                <a class="lesson-resource-card" href="../../index.html#code">
+                  <span class="lesson-resource-label">代码现实</span>
+                  <h3>代码锚点</h3>
+                  <p>回到首页那个把这些想法映射到 CUTLASS 与自定义 Hopper kernel 的章节。</p>
+                </a>
+              </div>
+            </section>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <nav class="footer-nav" aria-label="页脚">
+        <a href="../../index.html#top">首页</a>
+        <a href="../../index.html#lessons">课程</a>
+        <a href="../../index.html#explore">探索</a>
+        <a href="../../index.html#visuals">可视化</a>
+        <a href="../../slides.html">幻灯片</a>
+      </nav>
+      <p>CUDA Programming for NVIDIA H100s</p>
+      <p>Prateek Shukla</p>
+    </footer>
+
+    <script src="../../script.js"></script>
+  </body>
+</html>

@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+      name="description"
+      content="《CUDA Programming for NVIDIA H100s》第 8.1 课：Stream-K 调度、工作切分、fixup（修正）、锁、分组局部性，以及 Hopper 上的常驻 tile 调度器。"
+    >
+    <meta name="theme-color" content="#08111d">
+    <title>第 8.1 课 - Stream-K | CUDA Programming for NVIDIA H100s</title>
+    <link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&family=Urbanist:wght@500;600;700;800&display=swap"
+      rel="stylesheet"
+    >
+    <link rel="stylesheet" href="../../styles.css">
+  </head>
+  <body class="lesson-view lesson-view-streamk">
+    <header class="site-header">
+      <a class="header-mark" href="../../index.html#top" aria-label="CUDA Programming for NVIDIA H100s">
+        <span>Prateek Shukla</span>
+        <span>CUDA Programming for NVIDIA H100s</span>
+      </a>
+      <button
+        class="nav-toggle"
+        type="button"
+        aria-expanded="false"
+        aria-controls="site-nav"
+        aria-label="打开导航"
+      >
+        <span class="nav-toggle-label">菜单</span>
+        <span class="nav-toggle-icon" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
+        </span>
+      </button>
+      <nav class="site-nav" id="site-nav" aria-label="课程导航">
+        <a href="#overview">概览</a>
+        <a href="#work">工作单元</a>
+        <a href="#roles">角色</a>
+        <a href="#locks">锁</a>
+        <a href="#groups">分组</a>
+        <a href="#takeaways">要点</a>
+        <a href="../../index.html#explore">探索</a>
+        <a class="lang-switch" href="../lesson-8.1.html" lang="en" hreflang="en" aria-label="Switch to English version">English</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="lesson-hero">
+        <div class="section-shell lesson-hero-grid">
+          <div class="lesson-hero-copy">
+            <p class="hero-credit">课程导览 / 第 8.1 课</p>
+            <h1 class="lesson-hero-title">Stream-K</h1>
+            <p class="lesson-hero-summary">
+              第 8.1 课是让常驻（persistent）kernel 显得完整的调度器（scheduler）附录。Stream-K
+              不是把一个完整输出 tile 分配给一个 CTA、然后接受一条孱弱的尾部波（wave），而是把剩余的 K
+              工作切成一条均衡的工作带（tape），显式跟踪 split 的所有权，并且只在尾部真正需要的地方支付归约（reduction）成本。
+            </p>
+            <div class="lesson-chip-list" aria-label="第 8.1 课主题">
+              <span class="lesson-chip">Stream-K</span>
+              <span class="lesson-chip">Fixup</span>
+              <span class="lesson-chip">常驻调度</span>
+              <span class="lesson-chip">分组</span>
+              <span class="lesson-chip">L2 局部性</span>
+            </div>
+            <div class="hero-actions">
+              <a
+                class="button button-primary"
+                href="../../H100-Course/slides/8.1 Stream-K.pdf"
+                target="_blank"
+                rel="noreferrer"
+              >
+                打开幻灯片
+              </a>
+              <a class="button button-secondary" href="../../index.html#explore">返回探索</a>
+            </div>
+          </div>
+
+          <aside class="lesson-meta-card" data-reveal>
+            <p class="lesson-meta-eyebrow">本课的重要性</p>
+            <h2>调度的单元从输出 tile 转移到一份受控的 K 工作预算。</h2>
+            <p>
+              Kernel Design 已经介绍了常驻调度。这个附录单独拎出了棘手的部分：如何消除半空的尾部波，而不把整个问题变成昂贵的 split-K fixup。
+            </p>
+            <dl class="lesson-facts">
+              <div>
+                <dt>课程位置</dt>
+                <dd>第 08.1 课，介于 Kernel Design 与 Multi GPU 之间</dd>
+              </div>
+              <div>
+                <dt>核心转变</dt>
+                <dd>一些 CTA 不再拥有完整的 tile，转而拥有 tile 内部的数学区间。</dd>
+              </div>
+              <div>
+                <dt>配套幻灯片</dt>
+                <dd><code>8.1 Stream-K.pdf</code></dd>
+              </div>
+              <div>
+                <dt>代码锚点</dt>
+                <dd><code>sm90_tile_scheduler_stream_k.hpp</code>、<code>sm90_tile_scheduler.hpp</code>、<code>sm90_tile_scheduler_group.hpp</code></dd>
+              </div>
+            </dl>
+          </aside>
+        </div>
+      </section>
+
+      <section class="lesson-body">
+        <div class="section-shell lesson-layout">
+          <aside class="lesson-sidebar">
+            <div class="lesson-sidebar-card">
+              <p class="section-kicker">本页内容</p>
+              <nav class="lesson-side-nav" aria-label="第 8.1 课小节">
+                <a href="#overview">Stream-K 为什么存在</a>
+                <a href="#work">工作单元与 split</a>
+                <a href="#roles">首个、中间与 final split 的角色</a>
+                <a href="#locks">工作区与锁协议</a>
+                <a href="#groups">分组局部性</a>
+                <a href="#takeaways">实践指导</a>
+                <a href="#continue">继续课程</a>
+              </nav>
+            </div>
+
+            <div class="lesson-sidebar-card">
+              <p class="section-kicker">关键要点</p>
+              <ul class="lesson-mini-list">
+                <li>Stream-K 是一个尾部均衡调度器，而不是问题中每个 tile 的默认答案。</li>
+                <li>每个 split 跟踪自己在 K 中从哪里开始、拥有多少 K，以及是否负责最终 epilogue。</li>
+                <li>分组（Groups）负责找回 L2 局部性（locality）——否则 1D 的 K 工作带会把协作的 CTA 分散到整个输出空间。</li>
+              </ul>
+            </div>
+
+            <div class="lesson-sidebar-card">
+              <p class="section-kicker">配套链接</p>
+              <a class="lesson-text-link" href="lesson-8.html">返回第 8 课</a>
+              <a class="lesson-text-link" href="lesson-8.2.html">打开第 8.2 课</a>
+              <a class="lesson-text-link" href="lesson-9.html">打开第 9 课</a>
+              <a class="lesson-text-link" href="../../files/sm90_tile_scheduler_stream_k.hpp" target="_blank" rel="noreferrer">打开 Stream-K 调度器</a>
+              <a class="lesson-text-link" href="../../files/sm90_tile_scheduler.hpp" target="_blank" rel="noreferrer">打开基础常驻调度器</a>
+              <a class="lesson-text-link" href="../../files/sm90_tile_scheduler_group.hpp" target="_blank" rel="noreferrer">打开分组调度器</a>
+            </div>
+          </aside>
+
+          <article class="lesson-article">
+            <section class="lesson-chapter" id="overview" data-reveal>
+              <h2>Stream-K 为什么存在</h2>
+              <p>
+                问题不在于正确性。朴素的数据并行常驻调度是正确的。问题在于利用率（utilization）。如果输出 tile
+                的数量不是可用 SM 数量的整洁倍数，最后一条波就会让机器的很大一部分闲置，而只有少数几个 CTA 在收尾。
+              </p>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3>tile 并行视角</h3>
+                  <p>
+                    一个 CTA 拥有一个输出 tile。这很干净、也便宜——直到最后一条波变得稀疏，大量 SM 都在等最后几个 tile 退场。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>Stream-K 视角</h3>
+                  <p>
+                    剩余的工作被当作一条沿 K 方向的数学迭代工作带。尾部 tile 可以被切开，让每个 SM 的完成时间更接近彼此。
+                  </p>
+                </article>
+              </div>
+              <p>
+                讲义谨慎地指出，这通常是一种混合策略。早期的波往往保持纯数据并行，因为那样开销最低。当它瞄准尾部波——分解失配正在那里造成可见伤害——时，Stream-K 最有价值。
+              </p>
+              <div class="lesson-note">
+                <p>
+                  <strong>讲义中一个有用的经验法则：</strong>如果尾部大体仍然占满，更好的选择可能是保留常规调度器、避免不必要的 split-K
+                  归约开销。当尾部明显欠满时，Stream-K 才最有吸引力。
+                </p>
+              </div>
+            </section>
+
+            <section class="lesson-chapter" id="work" data-reveal>
+              <h2>工作单元与 split 让调度器显式化</h2>
+              <p>
+                对一个输出 tile 而言，GEMM 是许多 K tile 之和。如果一个 CTA 把它们全部算完，就不需要归约。如果多个 CTA
+                各算这些 K tile 的一部分，那么每个 CTA 拥有该输出 tile 的一个 split，结果就需要 fixup。
+              </p>
+              <table class="lesson-table" aria-label="Stream-K 工作单元字段">
+                <thead>
+                  <tr>
+                    <th>字段</th>
+                    <th>含义</th>
+                    <th>为什么重要</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code>M_idx</code>, <code>N_idx</code>, <code>L_idx</code></td>
+                    <td>输出 tile 坐标。</td>
+                    <td>告诉 CTA 它为哪个 C tile 做贡献。</td>
+                  </tr>
+                  <tr>
+                    <td><code>K_idx</code></td>
+                    <td>该 split 在输出 tile 的 K 维度内部从哪里开始。</td>
+                    <td>把第一个 split 与中间或 final split 区分开。</td>
+                  </tr>
+                  <tr>
+                    <td><code>k_tile_count</code></td>
+                    <td>该 split 计算多少个 K tile。</td>
+                    <td>告诉你该 CTA 对这个输出 tile 实际拥有多少数学工作。</td>
+                  </tr>
+                  <tr>
+                    <td><code>k_tile_remaining</code></td>
+                    <td>工作单元还剩多少没有处理。</td>
+                    <td>很重要，因为一个 CTA 沿工作带前进时可能跨越多个 split。</td>
+                  </tr>
+                </tbody>
+              </table>
+              <p>
+                一个 split 就是一个 CTA 对一个输出 tile 的贡献。一个 CTA 可以在同一段被分配的数学工作范围内结束一个 tile、开始下一个
+                tile，这正是调度器同时跟踪 tile 坐标与 tile 内精确 K 起点的原因。
+              </p>
+              <pre class="lesson-pre"><code>// Conceptual split state
+tile: (M_idx, N_idx, L_idx)
+K_idx: where this CTA starts in the tile's K dimension
+k_tile_count: how much K this CTA computes
+
+is_final_split = (K_idx + k_tile_count) == k_tiles_per_output_tile</code></pre>
+            </section>
+
+            <section class="lesson-chapter" id="roles" data-reveal>
+              <h2>第一个、中间与 final split 的角色直接从这个状态中推出</h2>
+              <p>
+                一旦 CTA 知道了自己的 <code>K_idx</code> 和 <code>k_tile_count</code>，它的角色就不再神秘。幻灯片描述了三种情况，而本仓库里的
+                Stream-K 调度器头文件用 <code>is_final_split(...)</code> 和 <code>compute_epilogue(...)</code> 这样的辅助函数与它们对应。
+              </p>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3>第一个 split</h3>
+                  <p>
+                    <code>K_idx == 0</code>。还没有人为这个 tile 写过工作区（workspace），所以第一个 split 负责初始化部分结果。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>中间 split</h3>
+                  <p>
+                    拥有严格位于 tile 内部的一段 K 区间。它把自己的部分和归约进已有工作区，并不拥有最终 epilogue。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>final split</h3>
+                  <p>
+                    覆盖 K 维度的末端。它等待先前的 split，加载它们的部分和，加上自己的部分，然后拥有最终 epilogue。
+                  </p>
+                </article>
+              </div>
+              <p>
+                这才是真正的概念转变。CTA 仍然可以是常驻的，仍然可以遵循一个确定性的（deterministic）工作循环，但它不再保证从头到尾拥有一个完整的输出 tile。
+              </p>
+              <div class="lesson-note">
+                <p>
+                  <strong>反向迭代帮了 final split：</strong>讲义强调，worker 常以相反的 K
+                  顺序遍历共享 tile，让收尾的 split 更晚到达 fixup 点，从而减少它等待先前 split 完成的时间。
+                </p>
+              </div>
+            </section>
+
+            <section class="lesson-chapter" id="locks" data-reveal>
+              <h2>工作区与锁协议是均衡尾部的代价</h2>
+              <p>
+                split 所有权之所以能成立，是因为部分累加器可以被暂存进全局工作区，而进度可以用一把锁来跟踪。讲义把这把锁描述为每个输出 tile
+                一个整数，它单调地编码已经完成并发布了多少 K 工作。
+              </p>
+              <table class="lesson-table" aria-label="Stream-K fixup 协议">
+                <thead>
+                  <tr>
+                    <th>机制</th>
+                    <th>目的</th>
+                    <th>对执行的影响</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>归约工作区</td>
+                    <td>存储跨 CTA 拆分的 tile 的部分累加器。</td>
+                    <td>创造出一个场所，让后续 split 可以加载并归约先前的工作。</td>
+                  </tr>
+                  <tr>
+                    <td>锁/进度计数器</td>
+                    <td>记录该 tile 已经完成了多少 K 工作。</td>
+                    <td>让后续 split 知道自己可以按确定性方式还是机会主义方式进行归约。</td>
+                  </tr>
+                  <tr>
+                    <td>独立归约单元</td>
+                    <td>允许在某些调度器模式下把归约与 epilogue 工作显式建模。</td>
+                    <td>当调度器判定有利时，把数学所有权与最终 fixup 所有权解耦。</td>
+                  </tr>
+                </tbody>
+              </table>
+              <p>
+                本仓库的 Stream-K 头文件同时暴露确定性与非确定性两种归约模式。确定性路径等待它期望的精确累计 K
+                进度。非确定性路径更宽松，主要只关心工作区已初始化，随后中间 split 们便竞相往里归约。
+              </p>
+              <pre class="lesson-pre"><code>// Conceptual fixup flow
+first split   -> store partials, publish progress
+middle split  -> wait until workspace is valid, reduce partials, publish progress
+final split   -> wait for prior progress, load-add all required partials, run epilogue</code></pre>
+            </section>
+
+            <section class="lesson-chapter" id="groups" data-reveal>
+              <h2>分组在 1D 工作带打散 CTA 之后找回局部性</h2>
+              <p>
+                朴素的 Stream-K 分解均衡了工作，却破坏了那种有利于 L2 的漂亮空间波模式。分组就是局部性修复机制。它们把 Stream-K
+                单元划进子组（sub-group），让协作的 worker 彼此更靠近输出空间的同一区域，复用更多有用的缓存状态。
+              </p>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3>基础常驻调度器</h3>
+                  <p>
+                    保留标准的 tile 并行常驻循环、swizzle 与光栅（raster）顺序。当不需要 split-K fixup 时，它是那个廉价的基线。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>分组常驻调度器</h3>
+                  <p>
+                    把常驻性扩展到多个分组 GEMM 问题上，把它们当作一个长的线性 tile 空间，同时保留每组的 swizzle 与局部性元数据。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>Stream-K 调度器</h3>
+                  <p>
+                    增加 split 跟踪、归约所有权与局部性分组，让尾部能被均衡，同时不必完全放弃复用这个故事。
+                  </p>
+                </article>
+              </div>
+              <table class="lesson-table" aria-label="调度器文件图谱">
+                <thead>
+                  <tr>
+                    <th>文件</th>
+                    <th>在这个故事中的角色</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code>sm90_tile_scheduler.hpp</code></td>
+                    <td>基础静态常驻调度器与 swizzle 机制。</td>
+                  </tr>
+                  <tr>
+                    <td><code>sm90_tile_scheduler_group.hpp</code></td>
+                    <td>面向单次 launch 中多个 GEMM 问题的分组常驻扩展。</td>
+                  </tr>
+                  <tr>
+                    <td><code>sm90_tile_scheduler_stream_k.hpp</code></td>
+                    <td>Stream-K 路径所使用的 split-K、fixup、归约与分组局部性调度器。</td>
+                  </tr>
+                </tbody>
+              </table>
+              <p>
+                讲义还提到 HyTiS，把它作为对抗波量化（wave quantization）的另一种方式。即使你不采用它，它的观点也有用：Stream-K 不是唯一答案。当
+                K 是天然的切分维度时，它是一种用额外归约机制换取更好尾部利用率的答案。
+              </p>
+            </section>
+
+            <section class="lesson-chapter" id="takeaways" data-reveal>
+              <h2>实践指导</h2>
+              <ol>
+                <li><strong>为失配而用 Stream-K，而不是为用而用。</strong>目标是修好尾部波，而不是在常规常驻调度器已经高效时还去拆分每个 tile。</li>
+                <li><strong>显式跟踪 split 所有权。</strong><code>K_idx</code>、<code>k_tile_count</code> 与 final-split 状态，是决定一个 CTA 究竟是存储、归约还是运行 epilogue 的机制。</li>
+                <li><strong>记住 fixup 是真实的成本。</strong>工作区流量、锁和跨 CTA 归约，正是混合策略常常胜过处处应用 Stream-K 的原因。</li>
+                <li><strong>均衡之后保护局部性。</strong>分组很重要，因为一条纯 1D 工作带可以在解决利用率的同时悄悄摧毁 L2 复用。</li>
+                <li><strong>把调度器文件当作一个家族来读。</strong>基础常驻调度器、分组调度器与 Stream-K 调度器，是对同一个利用率问题的三个互相关联的答案。</li>
+              </ol>
+              <h3>术语表</h3>
+              <table class="lesson-table" aria-label="第 8.1 课术语表">
+                <tbody>
+                  <tr>
+                    <th>Split</th>
+                    <td>当 tile 沿 K 被划分时，一个 CTA 对一个输出 tile 的贡献。</td>
+                  </tr>
+                  <tr>
+                    <th>Fixup</th>
+                    <td>把来自多个 CTA 的部分累加器归约成一个最终输出 tile 的过程。</td>
+                  </tr>
+                  <tr>
+                    <th>Final split</th>
+                    <td>K 区间到达 tile 末尾、因而拥有最终 epilogue 的那个 split。</td>
+                  </tr>
+                  <tr>
+                    <th>Separate reduction</th>
+                    <td>一种调度器模式，其中归约与 epilogue 工作可以被建模为不同的工作单元。</td>
+                  </tr>
+                  <tr>
+                    <th>Group</th>
+                    <td>Stream-K 单元中保持局部性的一个子集，在工作带属于自己的那一段上协作。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </section>
+
+            <section class="lesson-chapter" id="continue" data-reveal>
+              <h2>继续课程</h2>
+              <p>
+                这个调度器附录为尾部均衡的故事画上句号，但还剩一个 kernel 补充。下一页看的是 launch 边界本身：launch
+                bounds、依赖 grid、程序化 stream 串行化（programmatic stream serialization），以及 Hopper
+                如何让一个 grid 的启动与另一个 grid 的尾部相互重叠。
+              </p>
+              <div class="lesson-resource-grid">
+                <a class="lesson-resource-card" href="lesson-8.2.html">
+                  <span class="lesson-resource-label">下一课</span>
+                  <h3>Kernel 启动</h3>
+                  <p>继续进入依赖启动、主机侧串行化控制，以及生产者 grid 与消费者 grid 之间的重叠窗口。</p>
+                </a>
+                <a class="lesson-resource-card" href="lesson-9.html">
+                  <span class="lesson-resource-label">之后</span>
+                  <h3>多 GPU 第 1 部分</h3>
+                  <p>继续进入 NVLink、NVSwitch、ConnectX、rails、拓扑，以及为什么在系统尺度上一个快 kernel 仍然不够。</p>
+                </a>
+                <a class="lesson-resource-card" href="../../files/sm90_tile_scheduler_stream_k.hpp" target="_blank" rel="noreferrer">
+                  <span class="lesson-resource-label">代码锚点</span>
+                  <h3>Stream-K 调度器</h3>
+                  <p>看到直接编码在 CUTLASS SM90 调度器代码中的 split 元数据、归约工作区逻辑与 epilogue 所有权规则。</p>
+                </a>
+                <a class="lesson-resource-card" href="../../files/sm90_tile_scheduler_group.hpp" target="_blank" rel="noreferrer">
+                  <span class="lesson-resource-label">代码锚点</span>
+                  <h3>分组调度器</h3>
+                  <p>打开分组常驻调度器，对比面向局部性的常驻方式与 Stream-K 扩展。</p>
+                </a>
+                <a class="lesson-resource-card" href="../../index.html#explore">
+                  <span class="lesson-resource-label">探索</span>
+                  <h3>返回课程档案</h3>
+                  <p>返回主页，继续浏览站内已有的课程页面与补充档案。</p>
+                </a>
+              </div>
+            </section>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <nav class="footer-nav" aria-label="页脚">
+        <a href="../../index.html#top">首页</a>
+        <a href="../../index.html#lessons">课程</a>
+        <a href="../../index.html#explore">探索</a>
+        <a href="../../index.html#visuals">可视化</a>
+        <a href="../../slides.html">幻灯片</a>
+      </nav>
+      <p>CUDA Programming for NVIDIA H100s</p>
+      <p>Prateek Shukla</p>
+    </footer>
+
+    <script src="../../script.js"></script>
+  </body>
+</html>

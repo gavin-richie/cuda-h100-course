@@ -1,0 +1,553 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="description" content="Hopper 上的 kernel 启动控制：launch bounds、grid 常量、依赖网格、程序化流串行，以及生产者与消费者 kernel 之间的重叠调优。">
+<meta name="theme-color" content="#08111d">
+        <title>第 8.2 课 - Kernel 启动 | CUDA Programming for NVIDIA H100s</title>
+    <link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&family=Urbanist:wght@500;600;700;800&display=swap"
+      rel="stylesheet"
+    >
+    <link rel="stylesheet" href="../../styles.css">
+  <!-- SEO:BEGIN -->
+    <meta name="author" content="Prateek Shukla">
+    <meta name="robots" content="index, follow, max-image-preview:large">
+    <link rel="canonical" href="https://cudacourseh100.github.io/pages/zh/lesson-8.2.html">
+    <meta property="og:locale" content="zh_CN">
+    <link rel="alternate" hreflang="en" href="https://cudacourseh100.github.io/pages/zh/lesson-8.2.html">
+    <link rel="alternate" hreflang="zh-CN" href="https://cudacourseh100.github.io/pages/zh/zh/lesson-8.2.html">
+    <link rel="alternate" hreflang="x-default" href="https://cudacourseh100.github.io/pages/zh/lesson-8.2.html">
+    <meta property="og:locale:alternate" content="en_US">
+    <meta property="og:site_name" content="CUDA Programming for NVIDIA H100s">
+    <meta property="og:type" content="article">
+    <meta property="og:title" content="Kernel 启动 | 第 8.2 课">
+    <meta property="og:description" content="Hopper 上的 kernel 启动控制：launch bounds、grid 常量、依赖网格、程序化流串行，以及生产者与消费者 kernel 之间的重叠调优。">
+    <meta property="og:url" content="https://cudacourseh100.github.io/pages/zh/lesson-8.2.html">
+    <meta property="og:image" content="https://cudacourseh100.github.io/social-card.png">
+    <meta property="og:image:type" content="image/png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="CUDA Programming for NVIDIA H100s">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Kernel 启动 | 第 8.2 课">
+    <meta name="twitter:description" content="Hopper 上的 kernel 启动控制：launch bounds、grid 常量、依赖网格、程序化流串行，以及生产者与消费者 kernel 之间的重叠调优。">
+    <meta name="twitter:image" content="https://cudacourseh100.github.io/social-card.png">
+    <meta name="twitter:image:alt" content="CUDA Programming for NVIDIA H100s">
+    <meta property="article:author" content="Prateek Shukla">
+    <meta property="article:section" content="Kernel 启动控制">
+    <meta property="article:tag" content="kernel 启动">
+    <meta property="article:tag" content="依赖网格">
+    <meta property="article:tag" content="程序化流串行">
+    <meta property="article:tag" content="griddepcontrol">
+    <meta property="article:tag" content="launch bounds">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "TechArticle",
+          "@id": "https://cudacourseh100.github.io/pages/zh/lesson-8.2.html#article",
+          "url": "https://cudacourseh100.github.io/pages/zh/lesson-8.2.html",
+          "headline": "Kernel 启动",
+          "name": "Kernel 启动",
+          "description": "Hopper 上的 kernel 启动控制：launch bounds、grid 常量、依赖网格、程序化流串行，以及生产者与消费者 kernel 之间的重叠调优。",
+          "inLanguage": "zh-CN",
+          "author": {
+            "@type": "Person",
+            "@id": "https://cudacourseh100.github.io/#person",
+            "name": "Prateek Shukla",
+            "url": "https://cudacourseh100.github.io/"
+          },
+          "mainEntityOfPage": "https://cudacourseh100.github.io/pages/zh/lesson-8.2.html",
+          "articleSection": "Kernel 启动控制",
+          "about": [
+            "kernel 启动",
+            "依赖网格",
+            "程序化流串行",
+            "griddepcontrol",
+            "launch bounds"
+          ],
+          "isPartOf": {
+            "@type": "Course",
+            "name": "CUDA Programming for NVIDIA H100s",
+            "url": "https://cudacourseh100.github.io/"
+          }
+        },
+        {
+          "@type": "BreadcrumbList",
+          "itemListElement": [
+            {
+              "@type": "ListItem",
+              "position": 1,
+              "name": "Home",
+              "item": "https://cudacourseh100.github.io/"
+            },
+            {
+              "@type": "ListItem",
+              "position": 2,
+              "name": "Kernel 启动",
+              "item": "https://cudacourseh100.github.io/pages/zh/lesson-8.2.html"
+            }
+          ]
+        }
+      ]
+    }
+    </script>
+    <!-- SEO:END -->
+  </head>
+  <body class="lesson-view lesson-view-kernel-launch">
+    <header class="site-header">
+      <a class="header-mark" href="../../index.html#top" aria-label="CUDA Programming for NVIDIA H100s">
+        <span>Prateek Shukla</span>
+        <span>CUDA Programming for NVIDIA H100s</span>
+      </a>
+      <button
+        class="nav-toggle"
+        type="button"
+        aria-expanded="false"
+        aria-controls="site-nav"
+        aria-label="打开导航"
+      >
+        <span class="nav-toggle-label">菜单</span>
+        <span class="nav-toggle-icon" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
+        </span>
+      </button>
+      <nav class="site-nav" id="site-nav" aria-label="课程导航">
+        <a href="#overview">概览</a>
+        <a href="#controls">启动控制</a>
+        <a href="#serialization">流串行化</a>
+        <a href="#gdc">依赖启动</a>
+        <a href="#window">重叠窗口</a>
+        <a href="#takeaways">要点</a>
+        <a href="../../index.html#explore">探索</a>
+        <a class="lang-switch" href="../lesson-8.2.html" lang="en" hreflang="en" aria-label="Switch to English version">English</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="lesson-hero">
+        <div class="section-shell lesson-hero-grid">
+          <div class="lesson-hero-copy">
+            <p class="hero-credit">课程导览 / 第 8.2 课</p>
+            <h1 class="lesson-hero-title">Kernel 启动</h1>
+            <p class="lesson-hero-summary">
+              第 8.2 课是关于交接（handoff）的补充课。重点不仅在于如何启动一个 kernel，还在于 Hopper
+              如何让你塑造启动驻留（launch residency）、标记 grid 生命周期参数，并放宽流串行化（stream
+              serialization），让下一个 grid 能在前一个 grid 全局退出之前启动。
+            </p>
+            <div class="lesson-chip-list" aria-label="第 8.2 课主题">
+              <span class="lesson-chip">启动边界（Launch Bounds）</span>
+              <span class="lesson-chip">grid 常量（Grid Constants）</span>
+              <span class="lesson-chip">依赖网格（Dependent Grids）</span>
+              <span class="lesson-chip">GDC</span>
+              <span class="lesson-chip">L2 预取（L2 Prefetch）</span>
+            </div>
+            <div class="hero-actions">
+              <a
+                class="button button-primary"
+                href="../../H100-Course/slides/8.2 Kernel Launch.pdf"
+                target="_blank"
+                rel="noreferrer"
+              >
+                打开幻灯片
+              </a>
+              <a class="button button-secondary" href="../../index.html#explore">返回探索</a>
+            </div>
+          </div>
+
+          <aside class="lesson-meta-card" data-reveal>
+            <p class="lesson-meta-eyebrow">本课的重要性</p>
+            <h2>grid 的启动时间与数据安全成为两个独立的控制点。</h2>
+            <p>
+              Hopper 让启动策略成为优化的一部分。本课聚焦于这个转折点：多 kernel 流水线（pipeline）从这里起不再是“先
+              kernel A 后 kernel B”，而是变成一个牵动调度器、内存与主机启动的协调重叠问题。
+            </p>
+            <dl class="lesson-facts">
+              <div>
+                <dt>课程位置</dt>
+                <dd>第 08.2 课，位于 Stream-K 之后、多 GPU 之前</dd>
+              </div>
+              <div>
+                <dt>主要转变</dt>
+                <dd>机器可以让依赖网格提前准入，同时仍对那些一旦执行就会破坏正确性的读取精确地施加栅栏（fence）。</dd>
+              </div>
+              <div>
+                <dt>配套幻灯片</dt>
+                <dd><code>8.2 Kernel Launch.pdf</code></dd>
+              </div>
+              <div>
+                <dt>具体锚点</dt>
+                <dd><code>matmul_12.cuh</code>、<code>pingpong_experimental.cuh</code>、<code>cudaLaunchKernelEx</code></dd>
+              </div>
+            </dl>
+          </aside>
+        </div>
+      </section>
+
+      <section class="lesson-body">
+        <div class="section-shell lesson-layout">
+          <aside class="lesson-sidebar">
+            <div class="lesson-sidebar-card">
+              <p class="section-kicker">本页内容</p>
+              <nav class="lesson-side-nav" aria-label="第 8.2 课小节">
+                <a href="#overview">为什么启动控制重要</a>
+                <a href="#controls">编译期与启动控制</a>
+                <a href="#serialization">为什么同流 kernel 会停顿</a>
+                <a href="#gdc">依赖启动协议</a>
+                <a href="#window">调优重叠窗口</a>
+                <a href="#takeaways">实践指导</a>
+                <a href="#continue">继续课程</a>
+              </nav>
+            </div>
+
+            <div class="lesson-sidebar-card">
+              <p class="section-kicker">关键要点</p>
+              <ul class="lesson-mini-list">
+                <li>多 kernel 边界往往就是正确的设计，而不是融合得不够彻底的失败。</li>
+                <li>依赖启动之所以可行，是因为它把调度器资格与内存读取安全分离开。</li>
+                <li>只有当启动窗口大到足以隐藏启动成本、又不至于大到制造有害竞争时，重叠才有帮助。</li>
+              </ul>
+            </div>
+
+            <div class="lesson-sidebar-card">
+              <p class="section-kicker">配套链接</p>
+              <a class="lesson-text-link" href="lesson-8.1.html">返回第 8.1 课</a>
+              <a class="lesson-text-link" href="lesson-9.html">打开第 9 课</a>
+              <a class="lesson-text-link" href="../../files/fast.cu/examples/matmul/matmul_12.cuh" target="_blank" rel="noreferrer">打开 <code>matmul_12.cuh</code></a>
+              <a class="lesson-text-link" href="../../files/fast.cu/examples/matmul/pingpong_experimental.cuh" target="_blank" rel="noreferrer">打开 <code>pingpong_experimental.cuh</code></a>
+            </div>
+          </aside>
+
+          <article class="lesson-article">
+            <section class="lesson-chapter" id="overview" data-reveal>
+              <h2>为什么 kernel 启动值得单独一课</h2>
+              <p>
+                笔记明确指出，多 kernel 设计不只是“真正的”优化做完之后的清理工作。有些后处理阶段确实需要边界。epilogue
+                会撞上实际上限，融合工作会推高寄存器（register）压力，而 LayerNorm 或 Softmax
+                这类跨 tile 操作需要一个点：一个阶段完成之后，下一个阶段才能基于其输出进行推演。
+              </p>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3>是什么迫使出现边界</h3>
+                  <p>
+                    跨 tile 归约、沉重的 epilogue，以及再也无法与累加器 mainloop 舒适共处的状态，让干净的交接成为正确的架构。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>Hopper 改变了什么</h3>
+                  <p>
+                    交接不再必须意味着“生产者（producer）完全退出，然后消费者（consumer）冷启动”。只要启动包（launch
+                    packet）与指令流相互配合，Hopper 就能重叠启动路径。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>本课的核心规则</h3>
+                  <p>
+                    尽早启动，延后读取。让依赖网格在生产者全局完成之前预留上下文、执行安全的准备工作，但对依赖敏感的读取保持栅栏，直到真正安全。
+                  </p>
+                </article>
+              </div>
+              <div class="lesson-note">
+                <p>
+                  <strong>优化目标：</strong>不要问“如何避免多个 kernel？”要问“如何把边界做得足够便宜，让正确的分解仍然能以接近满速运行？”
+                </p>
+              </div>
+            </section>
+
+            <section class="lesson-chapter" id="controls" data-reveal>
+              <h2>启动控制横跨编译期形态与运行时权限</h2>
+              <p>
+                有些启动决策被嵌入 kernel 签名和代码生成（codegen）假设里。另一些则存在于主机侧启动包中。本补充课把这两个层级分开，因为
+                Hopper 的性能取决于你能否分清：哪个旋钮改变占用率（occupancy），哪个旋钮改变参数生命周期，哪个旋钮改变调度器策略。
+              </p>
+              <table class="lesson-table" aria-label="kernel 启动控制项">
+                <thead>
+                  <tr>
+                    <th>控制项</th>
+                    <th>表达了什么</th>
+                    <th>为什么在这里重要</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code>__cluster_dims__(x, y, z)</code></td>
+                    <td>编译期线程块集群（thread block cluster）形状。</td>
+                    <td>在 SM90 上很重要，因为集群驻留与多播（multicast）行为是真实 kernel 设计的一部分。</td>
+                  </tr>
+                  <tr>
+                    <td><code>__launch_bounds__(...)</code></td>
+                    <td>线程数与占用率假设的上界。</td>
+                    <td>启动形态是资源预算的一部分，后续的重叠决策必须在这个预算之内进行。</td>
+                  </tr>
+                  <tr>
+                    <td><code>__maxnreg__(N)</code></td>
+                    <td>每线程寄存器上限。</td>
+                    <td>当融合工作与依赖启动重叠同时挤压驻留资源时，这一点很重要。</td>
+                  </tr>
+                  <tr>
+                    <td><code>__grid_constant__</code></td>
+                    <td>只读的 grid 生命周期 kernel 参数。</td>
+                    <td>这正是 Hopper 用来承载描述符（descriptor）与启动期稳定控制数据的元数据路径。</td>
+                  </tr>
+                  <tr>
+                    <td><code>cudaLaunchKernelEx</code> + 属性</td>
+                    <td>主机侧对启动行为的运行时权限。</td>
+                    <td>程序化流串行许可正是在这里被真正授予的。</td>
+                  </tr>
+                </tbody>
+              </table>
+              <p>
+                本地的 fast.cu 示例在这里很有用，尽管它们并不是依赖启动的演示。像
+                <code>matmul_12.cuh</code> 和 <code>pingpong_experimental.cuh</code>
+                这样的文件直接展示了启动形态这一面：集群维度、启动边界和 grid 常量描述符在任何运行时启动包出现之前，就已经被编码进 kernel。
+              </p>
+              <pre class="lesson-pre"><code>__global__ __launch_bounds__(NUM_THREADS)
+void __cluster_dims__(CLUSTER_M * CLUSTER_N, 1, 1)
+matmulKernel12(
+    int M,
+    int N,
+    int K,
+    const __grid_constant__ CUtensorMap tensorMapC,
+    const __grid_constant__ CUtensorMap tensorMapA,
+    const __grid_constant__ CUtensorMap tensorMapB,
+    int* dspace);</code></pre>
+            </section>
+
+            <section class="lesson-chapter" id="serialization" data-reveal>
+              <h2>默认流串行化留下一个尾延迟空洞</h2>
+              <p>
+                在默认规则下，在同一流上启动的 kernel 表现得像一个有序队列。kernel B 在 kernel A
+                完全退出之前不具备资格。这意味着交接被绑在整 grid 退出上，而不是绑在更早的那个时刻——生产者的工作已经完成到足够程度、下一阶段可以开始准备的时刻。
+              </p>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3>为什么尾部有害</h3>
+                  <p>
+                    在生产者 grid 接近尾声时，只剩不断萎缩的 SM 子集还有工作。即使依赖网格已经确定并准备就绪，机器的其余部分也可能闲置。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>浪费了什么</h3>
+                  <p>
+                    代价不只是空转的周期。依赖网格稍后还要付出冷启动惩罚，因为没有任何上下文被准入，也没有任何安全的预取（prefetch）工作被允许提前开始。
+                  </p>
+                </article>
+              </div>
+              <pre class="lesson-pre"><code>Default behavior:
+producer grid fully retires
+-> dependent grid becomes eligible
+-> dependent grid starts booting</code></pre>
+              <p>
+                这正是本补充课想要软化的那堵串行化之墙。目标不是破坏正确性，而是把“有资格启动”与“可以安全读取依赖敏感数据”解开。
+              </p>
+            </section>
+
+            <section class="lesson-chapter" id="gdc" data-reveal>
+              <h2>依赖启动能够成立，是因为 Hopper 把调度器许可与读取许可拆开了</h2>
+              <p>
+                grid 依赖控制（grid dependency control，GDC）引入了两个控制点。一个是生产者侧的，与调度器对话；另一个是消费者侧的，在依赖真正解除之前对执行施加栅栏。正是这个拆分构成了让重叠成为可能、又不把交接变成竞态的机制。
+              </p>
+              <table class="lesson-table" aria-label="grid 依赖控制指令">
+                <thead>
+                  <tr>
+                    <th>机制</th>
+                    <th>做什么</th>
+                    <th>不做什么</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code>griddepcontrol.launch_dependents</code></td>
+                    <td>发出信号：依赖网格可以在生产者 grid 全局退出之前开始启动。</td>
+                    <td>它本身并不能让依赖敏感的加载变安全。</td>
+                  </tr>
+                  <tr>
+                    <td><code>griddepcontrol.wait</code></td>
+                    <td>把依赖 warp 停在确切的栅栏位置，未解除的读取在那里会变得不安全。</td>
+                    <td>它本身不授予提前资格；它只在依赖网格内部对执行施加栅栏。</td>
+                  </tr>
+                  <tr>
+                    <td><code>cudaLaunchAttributeProgrammaticStreamSerialization</code></td>
+                    <td>主机侧许可位，告诉启动机制遵循依赖启动协议。</td>
+                    <td>它不能替代设备侧指令；启动包与指令流两者缺一不可。</td>
+                  </tr>
+                </tbody>
+              </table>
+              <p>
+                笔记强有力地强调了主机权限这一点：设备指令本身不能覆盖流策略。如果主机启动描述符没有选择加入（opt-in），即使 kernel 包含相关指令，严格的同流串行化仍然生效。
+              </p>
+              <pre class="lesson-pre"><code>// producer kernel on the stream
+producer_kernel&lt;&lt;&lt;gridA, blockA, 0, stream&gt;&gt;&gt;(...);
+
+// dependent kernel with programmatic stream serialization permission
+cudaLaunchAttribute attr[1];
+attr[0].id = cudaLaunchAttributeProgrammaticStreamSerialization;
+attr[0].val.programmaticStreamSerializationAllowed = 1;
+
+cudaLaunchConfig_t cfg{};
+cfg.gridDim = gridB;
+cfg.blockDim = blockB;
+cfg.attrs = attr;
+cfg.numAttrs = 1;
+
+cudaLaunchKernelEx(&amp;cfg, consumer_kernel, ...);</code></pre>
+              <div class="lesson-note">
+                <p>
+                  <strong>概念上的拆分：</strong>生产者代码说“依赖方现在可以启动了。”依赖代码说“我会就停在这里，直到那些不安全的读取真正安全。”两侧缺一不可。
+                </p>
+              </div>
+            </section>
+
+            <section class="lesson-chapter" id="window" data-reveal>
+              <h2>重叠窗口是优化要么兑现要么崩塌的地方</h2>
+              <p>
+                一旦依赖网格可以提前到场，有趣的问题就变成了时机。启动得太晚，你几乎隐藏不到任何启动成本。启动得太早，生产者和消费者就会争夺同样的执行槽、寄存器、共享内存（shared memory）和缓存容量。
+              </p>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3>依赖方的墙</h3>
+                  <p>
+                    依赖网格中的 warp 可以运行准备代码，然后停靠在 <code>griddepcontrol.wait</code>。
+                    这会提前预留执行上下文——有用，但不是免费的。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>生产者的绿灯</h3>
+                  <p>
+                    <code>launch_dependents</code> 应该放在既能带来真实重叠的最晚安全点。太保守会浪费这个特性。太激进会制造竞争，并可能降低总吞吐量。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>预取分工</h3>
+                  <p>
+                    笔记着重展示了一个非对称的依赖 kernel：受依赖约束的 warp 停在 wait
+                    栅栏处，而另一些独立的 warp 把静态权重预取进 L2。这让内存系统保持忙碌，同时仍尊重激活读取的正确性。
+                  </p>
+                </article>
+              </div>
+              <table class="lesson-table" aria-label="重叠调优守护指标">
+                <thead>
+                  <tr>
+                    <th>重叠太少</th>
+                    <th>重叠太多</th>
+                    <th>健康目标</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>依赖网格仍要付出大部分冷启动成本。</td>
+                    <td>生产者与消费者争夺发射槽、驻留资源、L2 和内存队列。</td>
+                    <td>在仍能隐藏可观启动延迟的最晚安全时刻启动。</td>
+                  </tr>
+                  <tr>
+                    <td>从该特性获得的净收益很小。</td>
+                    <td>预取的缓存行可能在计算需要它们之前就被搅出 L2。</td>
+                    <td>只预取稳定的、可复用的张量，其安全性不依赖生产者的完成。</td>
+                  </tr>
+                  <tr>
+                    <td>反正在生产者完成之前，依赖网格基本处于闲置。</td>
+                    <td>即使并发在纸面上看起来更壮观，总运行时间也可能上升。</td>
+                    <td>观察 L2 命中率、队列压力和驻留余量，而不是仅凭表象评判重叠。</td>
+                  </tr>
+                </tbody>
+              </table>
+              <pre class="lesson-pre"><code>Dependent-launch protocol:
+producer issues launch_dependents
+-> dependent grid boots
+-> dependency-bound warps stop at wait
+-> dependency resolves
+-> stalled warps continue and consume the produced data</code></pre>
+            </section>
+
+            <section class="lesson-chapter" id="takeaways" data-reveal>
+              <h2>实践指导</h2>
+              <ol>
+                <li><strong>不要把多 kernel 边界当作失败。</strong>如果计算确实需要一条边界，正确的问题是如何隐藏它的代价，而不是否认它存在。</li>
+                <li><strong>让启动策略保持正确的分层。</strong>编译期启动形态、grid 生命周期参数与主机侧启动许可解决的是不同的问题。</li>
+                <li><strong>记住许可由主机掌控。</strong>程序化流串行是选择加入（opt-in）的行为，而不是对同流工作的默认解释。</li>
+                <li><strong>把启动重叠与读取安全分开。</strong>提前的调度器准入与正确的内存可见性相关，但它们不是同一个事件。</li>
+                <li><strong>为净吞吐量调优，而不是为好看的重叠截图调优。</strong>损害缓存驻留或队列压力的并发，很容易输给一个稍晚但更干净的启动点。</li>
+              </ol>
+              <h3>术语表</h3>
+              <table class="lesson-table" aria-label="第 8.2 课术语表">
+                <tbody>
+                  <tr>
+                    <th>程序化流串行（Programmatic stream serialization）</th>
+                    <td>由主机授权的、对默认同流排序的一种放宽，允许依赖网格参与启动/等待协议。</td>
+                  </tr>
+                  <tr>
+                    <th>启动依赖方（Launch dependents）</th>
+                    <td>生产者侧信号，告诉调度器某个依赖网格可以开始启动。</td>
+                  </tr>
+                  <tr>
+                    <th>依赖等待（Dependent wait）</th>
+                    <td>消费者侧栅栏，在依赖敏感读取变得合法之前使 warp 停滞。</td>
+                  </tr>
+                  <tr>
+                    <th>重叠窗口（Overlap window）</th>
+                    <td>从依赖方被提前准入，到未解除的依赖真正可以安全消费之间的时间间隔。</td>
+                  </tr>
+                  <tr>
+                    <th>grid 常量（Grid constant）</th>
+                    <td>一种只读 kernel 参数，保证在单个已启动 grid 的生命周期内保持稳定。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </section>
+
+            <section class="lesson-chapter" id="continue" data-reveal>
+              <h2>继续课程</h2>
+              <p>
+                本补充课为单节点 kernel 交接的故事收尾。下一课将放下 kernel 边界，进入互联 fabric 本身：NVLink、NVSwitch、rail，以及决定多少块 H100 合成一台训练机器的系统拓扑。
+              </p>
+              <div class="lesson-resource-grid">
+                <a class="lesson-resource-card" href="lesson-9.html">
+                  <span class="lesson-resource-label">下一课</span>
+                  <h3>多 GPU 第 1 部分</h3>
+                  <p>继续进入 DGX H100 拓扑、NVLink、NVSwitch、ConnectX、rail，以及为什么通信 fabric 会成为新的瓶颈。</p>
+                </a>
+                <a class="lesson-resource-card" href="../../files/fast.cu/examples/matmul/matmul_12.cuh" target="_blank" rel="noreferrer">
+                  <span class="lesson-resource-label">代码锚点</span>
+                  <h3><code>matmul_12.cuh</code></h3>
+                  <p>在一个具体的 Hopper GEMM kernel 内部看到 launch bounds、集群维度和 grid 常量张量映射（tensor map）。</p>
+                </a>
+                <a class="lesson-resource-card" href="../../files/fast.cu/examples/matmul/pingpong_experimental.cuh" target="_blank" rel="noreferrer">
+                  <span class="lesson-resource-label">代码锚点</span>
+                  <h3>Ping-Pong 实验</h3>
+                  <p>对比另一个启动形态示例：集群感知的 kernel 设置与描述符驱动的输入共同塑造运行时预算。</p>
+                </a>
+                <a class="lesson-resource-card" href="../../index.html#explore">
+                  <span class="lesson-resource-label">探索</span>
+                  <h3>返回课程档案</h3>
+                  <p>返回主页，继续浏览站内已经接好的整合课程页面与 kernel 补充档案。</p>
+                </a>
+              </div>
+            </section>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <nav class="footer-nav" aria-label="页脚">
+        <a href="../../index.html#top">首页</a>
+        <a href="../../index.html#lessons">课程</a>
+        <a href="../../index.html#explore">探索</a>
+        <a href="../../index.html#visuals">可视化</a>
+        <a href="../../slides.html">幻灯片</a>
+      </nav>
+      <p>CUDA Programming for NVIDIA H100s</p>
+      <p>Prateek Shukla</p>
+    </footer>
+
+    <script src="../../script.js"></script>
+  </body>
+</html>

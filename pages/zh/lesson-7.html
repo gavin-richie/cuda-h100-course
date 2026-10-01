@@ -1,0 +1,480 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+      name="description"
+      content="《CUDA Programming for NVIDIA H100s》第 7 课：WGMMA 提交与等待组、wgmma.fence、stmatrix、FP8 缩放与打包、K-major（K 主序）约束，以及稀疏 WGMMA 元数据。"
+    >
+    <meta name="theme-color" content="#08111d">
+    <title>第 7 课 - WGMMA Part 2 | CUDA Programming for NVIDIA H100s</title>
+    <link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&family=Urbanist:wght@500;600;700;800&display=swap"
+      rel="stylesheet"
+    >
+    <link rel="stylesheet" href="../../styles.css">
+  </head>
+  <body class="lesson-view lesson-view-wgmma-2">
+    <header class="site-header">
+      <a class="header-mark" href="../../index.html#top" aria-label="CUDA Programming for NVIDIA H100s">
+        <span>Prateek Shukla</span>
+        <span>CUDA Programming for NVIDIA H100s</span>
+      </a>
+      <button
+        class="nav-toggle"
+        type="button"
+        aria-expanded="false"
+        aria-controls="site-nav"
+        aria-label="打开导航"
+      >
+        <span class="nav-toggle-label">菜单</span>
+        <span class="nav-toggle-icon" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
+        </span>
+      </button>
+      <nav class="site-nav" id="site-nav" aria-label="课程导航">
+        <a href="#overview">概览</a>
+        <a href="#grouping">分组</a>
+        <a href="#stmatrix">stmatrix</a>
+        <a href="#fp8">FP8</a>
+        <a href="#sparse">稀疏</a>
+        <a href="#takeaways">要点</a>
+        <a href="../../index.html#explore">探索</a>
+        <a class="lang-switch" href="../lesson-7.html" lang="en" hreflang="en" aria-label="Switch to English version">English</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="lesson-hero">
+        <div class="section-shell lesson-hero-grid">
+          <div class="lesson-hero-copy">
+            <p class="hero-credit">课程导览 / 第 07 课</p>
+            <h1 class="lesson-hero-title">WGMMA Part 2</h1>
+            <p class="lesson-hero-summary">
+              第 7 课是 warpgroup 故事的其余部分。一旦 WGMMA 进入在途（in flight）状态，你仍然需要一个真正的生命周期：
+              对异步（asynchronous）数学运算进行分组与排空、正确处理累加器（accumulator）冒险（hazard）、用
+              <code>stmatrix</code> 把不透明的寄存器（register）碎片变成可存储的 tile，以及在不丢失机器模型的前提下应对
+              FP8 与稀疏（sparse）张量核心（tensor core）的约束。
+            </p>
+            <div class="lesson-chip-list" aria-label="第 7 课主题">
+              <span class="lesson-chip">commit_group</span>
+              <span class="lesson-chip">wait_group</span>
+              <span class="lesson-chip">stmatrix</span>
+              <span class="lesson-chip">FP8</span>
+              <span class="lesson-chip">稀疏 WGMMA</span>
+            </div>
+            <div class="hero-actions">
+              <a
+                class="button button-primary"
+                href="../../H100-Course/slides/7. Wgmma part 2.pdf"
+                target="_blank"
+                rel="noreferrer"
+              >
+                打开幻灯片
+              </a>
+              <a class="button button-secondary" href="../../index.html#explore">返回探索</a>
+            </div>
+          </div>
+
+          <aside class="lesson-meta-card" data-reveal>
+            <p class="lesson-meta-eyebrow">本课的重要性</p>
+            <h2>异步张量核心的发射会变成一条你必须关闭、排空、写回、有时还要压缩的流水线（pipeline）。</h2>
+            <p>
+              Part 1 引入了 warpgroup 发射。Part 2 要解释的，是让这套发射模型得以在真实 kernel 中存活的东西：
+              组边界、等待深度、寄存器冒险控制、累加器导出、FP8 传输规则，以及稀疏 MMA 的元数据路径。
+            </p>
+            <dl class="lesson-facts">
+              <div>
+                <dt>课程位置</dt>
+                <dd>第 07 课，共 10 课</dd>
+              </div>
+              <div>
+                <dt>核心转变</dt>
+                <dd>WGMMA 不再只是被发射出来。它必须被有意识地流水线化并排空。</dd>
+              </div>
+              <div>
+                <dt>配套幻灯片</dt>
+                <dd><code>7. Wgmma part 2.pdf</code></dd>
+              </div>
+              <div>
+                <dt>代码锚点</dt>
+                <dd><code>matmul_12.cuh</code> 和 <code>sm90_mma_tma_gmma_rs_warpspecialized.hpp</code></dd>
+              </div>
+            </dl>
+          </aside>
+        </div>
+      </section>
+
+      <section class="lesson-body">
+        <div class="section-shell lesson-layout">
+          <aside class="lesson-sidebar">
+            <div class="lesson-sidebar-card">
+              <p class="section-kicker">本页内容</p>
+              <nav class="lesson-side-nav" aria-label="第 7 课小节">
+                <a href="#overview">为什么生命周期控制很重要</a>
+                <a href="#grouping">提交、等待与栅栏</a>
+                <a href="#stmatrix">累加器导出</a>
+                <a href="#fp8">FP8 格式与打包</a>
+                <a href="#sparse">稀疏元数据规则</a>
+                <a href="#takeaways">实践指导</a>
+                <a href="#continue">继续课程</a>
+              </nav>
+            </div>
+
+            <div class="lesson-sidebar-card">
+              <p class="section-kicker">关键要点</p>
+              <ul class="lesson-mini-list">
+                <li><code>wgmma.commit_group</code> 与 <code>wgmma.wait_group&lt;N&gt;</code> 是流水线深度控制，而不是通用屏障（barrier）。</li>
+                <li><code>wgmma.fence</code> 为 WGMMA 排序寄存器冒险，但共享内存（shared memory）可见性仍然需要正确的、具备 proxy 意识的栅栏（fence）。</li>
+                <li><code>stmatrix</code>、FP8 打包（packing）与 sparse metadata 正是让异步张量核心结果在完整 kernel 中可用的东西。</li>
+              </ul>
+            </div>
+
+            <div class="lesson-sidebar-card">
+              <p class="section-kicker">配套链接</p>
+              <a class="lesson-text-link" href="lesson-6.html">返回第 6 课</a>
+              <a class="lesson-text-link" href="lesson-8.html">打开第 8 课</a>
+              <a class="lesson-text-link" href="../../files/fast.cu/examples/matmul/matmul_12.cuh" target="_blank" rel="noreferrer">打开 matmul_12.cuh</a>
+              <a class="lesson-text-link" href="../../files/sm90_mma_tma_gmma_rs_warpspecialized.hpp" target="_blank" rel="noreferrer">打开 RS WGMMA 锚点</a>
+            </div>
+          </aside>
+
+          <article class="lesson-article">
+            <section class="lesson-chapter" id="overview" data-reveal>
+              <h2>为什么生命周期控制很重要</h2>
+              <p>
+                <code>wgmma.mma_async</code> 会立即返回。这正是 Hopper 能够让张量数学与 TMA 加载、指针工作以及为下一个
+                tile 做 staging 相互重叠的全部原因。但一旦数学运算变成了异步的，程序还需要一种办法来把发射打包成组、
+                限制在途数量，并知道累加器何时才真正可以安全消费。
+              </p>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3>按批次跟踪，而不是逐个跟踪 MMA</h3>
+                  <p>
+                    讲义明确指出，组的存在就是为了让硬件不必对每一条 MMA 独立做 scoreboard 跟踪。一个 tile
+                    的发射量由此成为一个可跟踪单元。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>只在下一阶段需要时才排空</h3>
+                  <p>
+                    你通常不会想在每个发射窗口后面都放一个“等待一切”的屏障。你会让一些组保持在途、为下一批工作做
+                    staging，只有在消费寄存器或执行 store 之前才完全排空。
+                  </p>
+                </article>
+              </div>
+              <div class="lesson-note">
+                <p>
+                  <strong>值得记住的模式：</strong>发射一个批次，提交它，开始准备下一个批次，只等到在途深度回落到期望的窗口为止；而当你真正需要完全物化的结果时，使用
+                  <code>wait_group 0</code>。
+                </p>
+              </div>
+            </section>
+
+            <section class="lesson-chapter" id="grouping" data-reveal>
+              <h2>提交、等待与栅栏定义了 WGMMA 生命周期</h2>
+              <p>
+                分组给了 WGMMA 流水线友好的粒度。当前这批异步 MMA 会一直保持“打开”状态，直到你用
+                <code>wgmma.commit_group.sync.aligned</code> 把它关闭。之后，<code>wgmma.wait_group</code>
+                让 warpgroup 只在已提交的批次中仍有太多在途时才停顿（stall）。
+              </p>
+              <pre class="lesson-pre"><code>// One output-tile worth of async math
+wgmma.mma_async ...
+wgmma.mma_async ...
+wgmma.commit_group.sync.aligned;
+
+// Prepare the next tile while some math still runs
+// TMA, pointer math, shared-memory staging, etc.
+wgmma.wait_group.sync.aligned 1;
+
+// Before reading accumulators or exporting them
+wgmma.wait_group.sync.aligned 0;</code></pre>
+              <table class="lesson-table" aria-label="WGMMA 生命周期指令">
+                <thead>
+                  <tr>
+                    <th>指令</th>
+                    <th>它做什么</th>
+                    <th>它不做什么</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code>wgmma.commit_group</code></td>
+                    <td>关闭当前批次，让硬件可以把它当作一个已提交的组来跟踪。</td>
+                    <td>它不会等待完成。</td>
+                  </tr>
+                  <tr>
+                    <td><code>wgmma.wait_group N</code></td>
+                    <td>停顿，直到只剩 <code>N</code> 个已提交的组仍在途。</td>
+                    <td>它不是那种“永远同步所有张量工作”的一揽子原语，除非 <code>N = 0</code>。</td>
+                  </tr>
+                  <tr>
+                    <td><code>wgmma.fence.sync.aligned</code></td>
+                    <td>标记 warpgroup 发射边界，并为 WGMMA 排序累加器/寄存器来源操作数的冒险。</td>
+                    <td>它不是面向 TMA 或共享内存可见性的异步 proxy 栅栏。</td>
+                  </tr>
+                </tbody>
+              </table>
+              <p>
+                本课对最后这个区别非常谨慎。<code>wgmma.fence</code> 关心的是 WGMMA
+                流水线本身，尤其是累加器和驻留在寄存器中的 A 碎片。如果共享内存的内容是经由异步 proxy
+                路径产生的，那么在消费它之前，你仍然需要正确的跨 proxy 发布规则。
+              </p>
+            </section>
+
+            <section class="lesson-chapter" id="stmatrix" data-reveal>
+              <h2><code>stmatrix</code> 是不透明累加器碎片变成可用 tile 的途径</h2>
+              <p>
+                当 WGMMA 结束时，结果并不是以干净的行主序（row-major）矩阵形式躺在寄存器里。它按照张量核心内部使用的精确布局（layout），碎片化地分布在
+                128 个线程之中。<code>stmatrix</code> 就是那条协作式（cooperative）store
+                指令，把这些碎片以正常的矩阵布局写回共享内存。
+              </p>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3>类似 <code>ldmatrix</code>，但方向相反</h3>
+                  <p>
+                    数据所有权与地址所有权是解耦的。线程提供它们所持有的寄存器，以及把这些碎片落进正确的行主序目的地所需的地址。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>仍然是 tile 结构化的</h3>
+                  <p>
+                    基本原子（atom）是 <code>m8n8</code> 矩阵 tile。像 <code>.x4</code>
+                    这样的变体让每个线程贡献四个已打包的寄存器，从而可以一次一片（slice）地序列化出更大的逻辑 tile。
+                  </p>
+                </article>
+              </div>
+              <pre class="lesson-pre"><code>// From the repo's matmul_12.cuh epilogue flow
+// convert/pack fragments
+// stmatrix.sync.aligned.m8n8.x4.trans.shared::cta.b16 [...]
+// bar.sync across the warpgroup
+// issue TMA store for the completed tile</code></pre>
+              <h3>FP32 累加器是重要的注意事项</h3>
+              <p>
+                <code>stmatrix</code> 不支持 <code>.f32</code> 数据。它支持打包的 <code>.b16</code>
+                和 <code>.b8</code> 形式。所以如果 WGMMA 累加到了 FP32 寄存器里，你不能把这些寄存器直接喂给
+                <code>stmatrix</code>。你必须先向下转换（downcast）并打包这些值，这正是 FP32
+                输出路径通常在共享内存 store 之前包含一个显式转换循环的原因。
+              </p>
+              <div class="lesson-note">
+                <p>
+                  <strong>为什么存在这个循环：</strong>一个逻辑输出 tile 通常大于单次 <code>stmatrix.x4</code>
+                  调用所能覆盖的范围，所以 epilogue 会把累加器切片逐个序列化、写进共享内存，然后把 tile 交给稍后的 TMA store 路径。
+                </p>
+              </div>
+            </section>
+
+            <section class="lesson-chapter" id="fp8" data-reveal>
+              <h2>FP8 既是一个传输与布局问题，也同样是一个精度选择</h2>
+              <p>
+                Hopper 的 FP8 路径很重要，因为它同时改变了数学吞吐量与操作数契约。本课把 FP8
+                定位为一种压缩训练格式：它仍然以 FP32 累加，但它的范围、缩放（scaling）、打包与布局决策可以决定正确性与性能的成败。
+              </p>
+              <table class="lesson-table" aria-label="FP8 格式指南">
+                <thead>
+                  <tr>
+                    <th>格式</th>
+                    <th>它偏向什么</th>
+                    <th>它为什么会出现</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code>e4m3</code></td>
+                    <td>更多的尾数精度，更小的动态范围。</td>
+                    <td>在范围可控时，常用于激活值和权重。</td>
+                  </tr>
+                  <tr>
+                    <td><code>e5m2</code></td>
+                    <td>更大的动态范围，更少的尾数精度。</td>
+                    <td>对梯度和幅度波动更大的路径很有用。</td>
+                  </tr>
+                </tbody>
+              </table>
+              <p>
+                缩放是让 8 位浮点保持有用的逃生通道。张量级（tensor-wise）、向量级（vector-wise）与块级（block-wise）方案之所以都存在，是因为原始
+                FP8 的范围太过局促，没有量化策略就无法信任。讲义还点名了 <code>.satfinite</code>
+                转换形式，让超出范围的值被钳制（clamp）住，而不是爆炸成不可用的结果。
+              </p>
+              <pre class="lesson-pre"><code>// Representative PTX conversion style
+cvt.rn.satfinite.e4m3x2.f16x2 ...
+cvt.rn.satfinite.e5m2x2.f32 ...</code></pre>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3><code>x4</code> 打包填满寄存器</h3>
+                  <p>
+                    <code>e4m3x4</code> 和 <code>e5m2x4</code> 把四个 FP8 值放进一个 32 位寄存器。这就是自然的存储与传输形式。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3><code>x2</code> 打包匹配数学路径</h3>
+                  <p>
+                    <code>e4m3x2</code> 和 <code>e5m2x2</code> 是 16 位打包形式，与 Hopper
+                    摄取低精度数学碎片的方式正好对齐。
+                  </p>
+                </article>
+              </div>
+              <h3>Hopper FP8 WGMMA 有更严格的操作数规则</h3>
+              <p>
+                课程讲义点名了固定的 <code>m64nNk32</code> FP8 形状，以及一个关键的 Hopper 限制：那条显而易见的
+                <code>ldmatrix ... .b8</code> 路径并不是 SM90a 在这里暴露的东西。这就是为什么实用的 Hopper FP8
+                kernel 往往要么对两个操作数都使用共享内存描述符（descriptor），要么走 RS 路径——用普通的共享内存加载把
+                A 装进寄存器，并已按 WGMMA 期望的布局打包好。
+              </p>
+              <p>
+                同一份讲义还强调了严格的 K-major 规则。与 FP16/BF16 形式不同，FP8 WGMMA
+                不会给你同样的转置逃生通道。如果暂存的操作数 tile 还不是 K-major
+                的，你就得为额外的重打包和同步付出代价，之后张量核心才能消费它们。
+              </p>
+              <div class="lesson-note">
+                <p>
+                  <strong>数值上的提醒：</strong>即使文档写明的累加器类型是 FP32，本课也援引了实证报告：FP8
+                  累加的行为可能像一种降低精度的 FP32 变体。大 K 的归约（reduction）可能需要 K
+                  切分（K-slicing）或分阶段累加，才能把误差增长控制住。
+                </p>
+              </div>
+            </section>
+
+            <section class="lesson-chapter" id="sparse" data-reveal>
+              <h2>稀疏 WGMMA 增加了第二份契约：元数据正确性</h2>
+              <p>
+                稀疏 WGMMA 仍然是矩阵乘累加（matrix multiply-accumulate），但硬件假设了一种非常特定的结构化稀疏模式。支持的模型是稀疏
+                A 乘稠密 B。A 携带压缩后的数据，外加告诉张量核心幸存值属于哪里的元数据。
+              </p>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3><code>sp_meta</code></h3>
+                  <p>
+                    一个打包寄存器，包含幸存元素的位置元数据。对于 2:4 稀疏度，它记录每个四元组（quartet）中有哪两个索引留存下来。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3><code>sp_sel</code></h3>
+                  <p>
+                    一个选择器（selector），告诉硬件哪些线程负责为当前指令形状呈现元数据。如果该选择器与实际的加载策略不匹配，张量核心就会读到错误的元数据。
+                  </p>
+                </article>
+              </div>
+              <table class="lesson-table" aria-label="稀疏 WGMMA 选择器规则">
+                <thead>
+                  <tr>
+                    <th>情形</th>
+                    <th>讲义中的选择器规则</th>
+                    <th>为什么重要</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>FP16 / BF16 稀疏</td>
+                    <td><code>sp_sel</code> 可以任选一对贡献线程。</td>
+                    <td>让你可以把选择器匹配到元数据实际被加载的位置。</td>
+                  </tr>
+                  <tr>
+                    <td>FP8 / INT8 稀疏</td>
+                    <td><code>sp_sel</code> 必须为 <code>0</code>。</td>
+                    <td>对这些形状，讲义把任何其他值都视为未定义。</td>
+                  </tr>
+                  <tr>
+                    <td>复制式元数据加载器</td>
+                    <td>使用简单的选择器，并把相同的元数据广播给相关线程。</td>
+                    <td>降低元数据所有权错位的机会。</td>
+                  </tr>
+                </tbody>
+              </table>
+              <p>
+                物理稀疏规则是 2:4。你不能只是扔掉两个值然后听天由命。你必须存储幸存者，外加足够的元数据，让硬件能在每个四元组内重构它们的原始位置。错误的元数据不会优雅降级。它只会让张量核心读到错误的稀疏模式。
+              </p>
+            </section>
+
+            <section class="lesson-chapter" id="takeaways" data-reveal>
+              <h2>实践指导</h2>
+              <ol>
+                <li><strong>用发射窗口来思考。</strong>把异步 MMA 分批组织进逻辑组，然后选择一个能保持重叠的等待深度，而不是塌缩回完全串行化。</li>
+                <li><strong>只在消费时排空。</strong>在读取累加器、用 <code>stmatrix</code> 导出它们，或者以其他方式把结果当作完成之前，使用 <code>wait_group 0</code>。</li>
+                <li><strong>把寄存器排序与内存可见性分开。</strong><code>wgmma.fence</code> 不能替代 TMA 支撑的流水线所使用的异步 proxy 发布规则。</li>
+                <li><strong>把 FP8 当作一份布局契约。</strong>缩放、打包、K-major staging 与转换策略，和名义数据类型同等重要。</li>
+                <li><strong>绝不要对 sparse metadata 含糊其辞。</strong>只有当载荷与选择器逻辑精确匹配时，稀疏张量核心才能工作。</li>
+              </ol>
+              <h3>术语表</h3>
+              <table class="lesson-table" aria-label="第 7 课术语表">
+                <tbody>
+                  <tr>
+                    <th><code>wgmma.commit_group</code></th>
+                    <td>关闭当前这批异步 MMA，让硬件可以把它当作一个已提交的组来跟踪。</td>
+                  </tr>
+                  <tr>
+                    <th><code>wgmma.wait_group</code></th>
+                    <td>限制还有多少个已提交 WGMMA 组保持在途的等待原语。</td>
+                  </tr>
+                  <tr>
+                    <th><code>stmatrix</code></th>
+                    <td>协作式矩阵 store 指令，把张量核心碎片从寄存器写回共享内存。</td>
+                  </tr>
+                  <tr>
+                    <th><code>e4m3</code> / <code>e5m2</code></th>
+                    <td>Hopper 的两种 FP8 浮点格式，在尾数精度与动态范围之间做取舍。</td>
+                  </tr>
+                  <tr>
+                    <th><code>sp_meta</code></th>
+                    <td>打包的元数据，告诉稀疏张量核心来自稀疏 A 的幸存非零值应当属于哪里。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </section>
+
+            <section class="lesson-chapter" id="continue" data-reveal>
+              <h2>继续课程</h2>
+              <p>
+                第 7 课完成了 WGMMA 指令模型。下一课从单个原语拉远到整个 kernel：算术强度（arithmetic
+                intensity）、warp 专用化（warp specialization）、循环缓冲（circular buffering）、常驻（persistent）调度，以及让
+                Hopper 在完整 GEMM 中保持繁忙的流水线形态。
+              </p>
+              <div class="lesson-resource-grid">
+                <a class="lesson-resource-card" href="lesson-8.html">
+                  <span class="lesson-resource-label">下一课</span>
+                  <h3>内核设计</h3>
+                  <p>从 WGMMA 机制进入 ping-pong 与协作流水线、调度与收尾阶段（epilogue）设计。</p>
+                </a>
+                <a class="lesson-resource-card" href="../../files/fast.cu/examples/matmul/matmul_12.cuh" target="_blank" rel="noreferrer">
+                  <span class="lesson-resource-label">代码锚点</span>
+                  <h3>matmul_12.cuh</h3>
+                  <p>在同一个 kernel 中看到 <code>wgmma.fence</code>、提交与等待辅助函数、<code>stmatrix</code> epilogue 循环，以及 TMA store 交接。</p>
+                </a>
+                <a class="lesson-resource-card" href="../../files/sm90_mma_tma_gmma_rs_warpspecialized.hpp" target="_blank" rel="noreferrer">
+                  <span class="lesson-resource-label">代码锚点</span>
+                  <h3>RS WGMMA 主循环</h3>
+                  <p>打开寄存器来源（RS）的 SM90 路径，让 FP8 与布局的讨论在生产级 kernel 形态中变得具体。</p>
+                </a>
+                <a class="lesson-resource-card" href="../../index.html#explore">
+                  <span class="lesson-resource-label">探索</span>
+                  <h3>返回课程档案</h3>
+                  <p>返回主页，继续浏览站内一体化的课程页面。</p>
+                </a>
+              </div>
+            </section>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <nav class="footer-nav" aria-label="页脚">
+        <a href="../../index.html#top">首页</a>
+        <a href="../../index.html#lessons">课程</a>
+        <a href="../../index.html#explore">探索</a>
+        <a href="../../index.html#visuals">可视化</a>
+        <a href="../../slides.html">幻灯片</a>
+      </nav>
+      <p>CUDA Programming for NVIDIA H100s</p>
+      <p>Prateek Shukla</p>
+    </footer>
+
+    <script src="../../script.js"></script>
+  </body>
+</html>

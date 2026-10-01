@@ -1,0 +1,562 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="description" content="Slurm、PMIx、NCCL 通信器与集合通信，以及 H100 系统上的数据、张量、流水线与专家并行编排。">
+<meta name="theme-color" content="#08111d">
+        <title>第 10 课 - 多 GPU 第 2 部分 | CUDA Programming for NVIDIA H100s</title>
+    <link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&family=Urbanist:wght@500;600;700;800&display=swap"
+      rel="stylesheet"
+    >
+    <link rel="stylesheet" href="../../styles.css">
+  <!-- SEO:BEGIN -->
+    <meta name="author" content="Prateek Shukla">
+    <meta name="robots" content="index, follow, max-image-preview:large">
+    <link rel="canonical" href="https://cudacourseh100.github.io/pages/zh/lesson-10.html">
+    <meta property="og:locale" content="zh_CN">
+    <link rel="alternate" hreflang="en" href="https://cudacourseh100.github.io/pages/zh/lesson-10.html">
+    <link rel="alternate" hreflang="zh-CN" href="https://cudacourseh100.github.io/pages/zh/zh/lesson-10.html">
+    <link rel="alternate" hreflang="x-default" href="https://cudacourseh100.github.io/pages/zh/lesson-10.html">
+    <meta property="og:locale:alternate" content="en_US">
+    <meta property="og:site_name" content="CUDA Programming for NVIDIA H100s">
+    <meta property="og:type" content="article">
+    <meta property="og:title" content="多 GPU 第 2 部分 | 第 10 课">
+    <meta property="og:description" content="Slurm、PMIx、NCCL 通信器与集合通信，以及 H100 系统上的数据、张量、流水线与专家并行编排。">
+    <meta property="og:url" content="https://cudacourseh100.github.io/pages/zh/lesson-10.html">
+    <meta property="og:image" content="https://cudacourseh100.github.io/social-card.png">
+    <meta property="og:image:type" content="image/png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="CUDA Programming for NVIDIA H100s">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="多 GPU 第 2 部分 | 第 10 课">
+    <meta name="twitter:description" content="Slurm、PMIx、NCCL 通信器与集合通信，以及 H100 系统上的数据、张量、流水线与专家并行编排。">
+    <meta name="twitter:image" content="https://cudacourseh100.github.io/social-card.png">
+    <meta name="twitter:image:alt" content="CUDA Programming for NVIDIA H100s">
+    <meta property="article:author" content="Prateek Shukla">
+    <meta property="article:section" content="分布式编排">
+    <meta property="article:tag" content="Slurm">
+    <meta property="article:tag" content="PMIx">
+    <meta property="article:tag" content="NCCL">
+    <meta property="article:tag" content="集合通信">
+    <meta property="article:tag" content="分布式编排">
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "TechArticle",
+          "@id": "https://cudacourseh100.github.io/pages/zh/lesson-10.html#article",
+          "url": "https://cudacourseh100.github.io/pages/zh/lesson-10.html",
+          "headline": "多 GPU 第 2 部分",
+          "name": "多 GPU 第 2 部分",
+          "description": "Slurm、PMIx、NCCL 通信器与集合通信，以及 H100 系统上的数据、张量、流水线与专家并行编排。",
+          "inLanguage": "zh-CN",
+          "author": {
+            "@type": "Person",
+            "@id": "https://cudacourseh100.github.io/#person",
+            "name": "Prateek Shukla",
+            "url": "https://cudacourseh100.github.io/"
+          },
+          "mainEntityOfPage": "https://cudacourseh100.github.io/pages/zh/lesson-10.html",
+          "articleSection": "分布式编排",
+          "about": [
+            "Slurm",
+            "PMIx",
+            "NCCL",
+            "集合通信",
+            "分布式编排"
+          ],
+          "isPartOf": {
+            "@type": "Course",
+            "name": "CUDA Programming for NVIDIA H100s",
+            "url": "https://cudacourseh100.github.io/"
+          }
+        },
+        {
+          "@type": "BreadcrumbList",
+          "itemListElement": [
+            {
+              "@type": "ListItem",
+              "position": 1,
+              "name": "Home",
+              "item": "https://cudacourseh100.github.io/"
+            },
+            {
+              "@type": "ListItem",
+              "position": 2,
+              "name": "多 GPU 第 2 部分",
+              "item": "https://cudacourseh100.github.io/pages/zh/lesson-10.html"
+            }
+          ]
+        }
+      ]
+    }
+    </script>
+    <!-- SEO:END -->
+  </head>
+  <body class="lesson-view lesson-view-orchestration">
+    <header class="site-header">
+      <a class="header-mark" href="../../index.html#top" aria-label="CUDA Programming for NVIDIA H100s">
+        <span>Prateek Shukla</span>
+        <span>CUDA Programming for NVIDIA H100s</span>
+      </a>
+      <button
+        class="nav-toggle"
+        type="button"
+        aria-expanded="false"
+        aria-controls="site-nav"
+        aria-label="打开导航"
+      >
+        <span class="nav-toggle-label">菜单</span>
+        <span class="nav-toggle-icon" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
+        </span>
+      </button>
+      <nav class="site-nav" id="site-nav" aria-label="课程导航">
+        <a href="#overview">概览</a>
+        <a href="#slurm">Slurm</a>
+        <a href="#pmix">PMIx</a>
+        <a href="#nccl">NCCL</a>
+        <a href="#collectives">集合通信</a>
+        <a href="#parallelism">并行</a>
+        <a href="../../index.html#explore">探索</a>
+        <a class="lang-switch" href="../lesson-10.html" lang="en" hreflang="en" aria-label="Switch to English version">English</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="lesson-hero">
+        <div class="section-shell lesson-hero-grid">
+          <div class="lesson-hero-copy">
+            <p class="hero-credit">课程导览 / 第 10 课</p>
+            <h1 class="lesson-hero-title">多 GPU 第 2 部分</h1>
+            <p class="lesson-hero-summary">
+              第 10 课讲的是集群（cluster）的软件侧。Slurm 分配作业，PMIx 让各个 rank 相互认识，NCCL 把这些 bootstrap
+              状态变成通信器（communicator）和路由，而现代训练的并行策略则把它们的张量移动映射到这些集合通信（collective）操作上。
+            </p>
+            <div class="lesson-chip-list" aria-label="第 10 课主题">
+              <span class="lesson-chip">Slurm</span>
+              <span class="lesson-chip">PMIx</span>
+              <span class="lesson-chip">NCCL</span>
+              <span class="lesson-chip">集合通信</span>
+              <span class="lesson-chip">并行</span>
+            </div>
+            <div class="hero-actions">
+              <a
+                class="button button-primary"
+                href="../../H100-Course/slides/10. Multi GPU  Part 2.pdf"
+                target="_blank"
+                rel="noreferrer"
+              >
+                打开幻灯片
+              </a>
+              <a class="button button-secondary" href="../../index.html#explore">返回探索</a>
+            </div>
+          </div>
+
+          <aside class="lesson-meta-card" data-reveal>
+            <p class="lesson-meta-eyebrow">本课的重要性</p>
+            <h2>通信 fabric 终于有了自己的控制平面、bootstrap 路径和运行时 API。</h2>
+            <p>
+              第 9 课解释了硬件。第 10 课解释这些硬件如何变成一台可用的分布式执行引擎：谁来启动各个 rank，它们如何相互发现，通信器如何形成，以及哪种集合通信或并行模式真正契合工作负载。
+            </p>
+            <dl class="lesson-facts">
+              <div>
+                <dt>课程位置</dt>
+                <dd>第 10 课，共 10 课</dd>
+              </div>
+              <div>
+                <dt>核心转变</dt>
+                <dd>分布式执行变成了一个关于启动、发现和通信协议的问题。</dd>
+              </div>
+              <div>
+                <dt>配套幻灯片</dt>
+                <dd><code>10. Multi GPU Part 2.pdf</code></dd>
+              </div>
+              <div>
+                <dt>仓库说明</dt>
+                <dd><code>files/</code> 中没有发布本地的 Slurm / PMIx / NCCL 源文件，因此本页面仍以课程幻灯片和第 9 课的系统上下文为锚点。</dd>
+              </div>
+            </dl>
+          </aside>
+        </div>
+      </section>
+
+      <section class="lesson-body">
+        <div class="section-shell lesson-layout">
+          <aside class="lesson-sidebar">
+            <div class="lesson-sidebar-card">
+              <p class="section-kicker">本页内容</p>
+              <nav class="lesson-side-nav" aria-label="第 10 课小节">
+                <a href="#overview">分布式技术栈如何拼合在一起</a>
+                <a href="#slurm">Slurm 与作业启动</a>
+                <a href="#pmix">PMIx 引导</a>
+                <a href="#nccl">NCCL 通信器设置</a>
+                <a href="#collectives">集合通信原语</a>
+                <a href="#parallelism">并行模式</a>
+                <a href="#continue">课程收官</a>
+              </nav>
+            </div>
+
+            <div class="lesson-sidebar-card">
+              <p class="section-kicker">关键要点</p>
+              <ul class="lesson-mini-list">
+                <li>Slurm 负责分配和启动，PMIx 交换 bootstrap 元数据，NCCL 把这些元数据变成 GPU 通信路径。</li>
+                <li><code>CUDA_VISIBLE_DEVICES</code> 和 local rank 是正确性的一部分，而不只是便利措施，因为每个任务看到的都是节点的过滤视图。</li>
+                <li>数据并行（data parallelism）、张量并行（tensor parallelism）、流水线并行（pipeline parallelism）和专家并行（expert parallelism）本质上是通信模式的选择，由集合通信操作和点对点传输构成。</li>
+              </ul>
+            </div>
+
+            <div class="lesson-sidebar-card">
+              <p class="section-kicker">配套链接</p>
+              <a class="lesson-text-link" href="lesson-9.html">返回第 9 课</a>
+              <a class="lesson-text-link" href="../../slides.html">浏览全部幻灯片</a>
+              <a class="lesson-text-link" href="../../index.html#explore">返回探索</a>
+            </div>
+          </aside>
+
+          <article class="lesson-article">
+            <section class="lesson-chapter" id="overview" data-reveal>
+              <h2>分布式技术栈如何拼合在一起</h2>
+              <p>
+                最后一课讲的是职责分离。一个训练作业并不是“NCCL 包办一切”。Slurm 决定工作在哪里运行，PMIx
+                给相互隔离的 rank 提供发布和获取 bootstrap 元数据的途径，而一旦参与者知道了自己是谁，NCCL 就会构建通信器并下发集合通信的 GPU 工作。
+              </p>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3>分配与启动</h3>
+                  <p>
+                    Slurm 控制节点（node）、GPU、CPU、内存、任务放置，以及每个进程的基本启动环境。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>发现与通信</h3>
+                  <p>
+                    PMIx 负责元数据交换。NCCL 利用这些状态再加上拓扑（topology）发现，为集合通信构建环形（ring）、树形（tree）与直连路径。
+                  </p>
+                </article>
+              </div>
+              <div class="lesson-note">
+                <p>
+                  <strong>课程中的精炼总结：</strong>Slurm 负责分配，PMIx 让对等方相互认识，NCCL 在集群中高效移动张量。
+                </p>
+              </div>
+            </section>
+
+            <section class="lesson-chapter" id="slurm" data-reveal>
+              <h2>Slurm 是集群的控制平面，而不是张量通信层</h2>
+              <p>
+                Slurm 的职责是资源分配、放置、环境设置和进程启动。它知道作业的形状、节点列表，以及哪些设备被分配给了哪个任务，但它本身并不解决各 rank 之间的相互发现或集合通信式 GPU 通信。
+              </p>
+              <table class="lesson-table" aria-label="Slurm 职责">
+                <thead>
+                  <tr>
+                    <th>职责</th>
+                    <th>它提供什么</th>
+                    <th>为什么重要</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>资源分配</td>
+                    <td>节点、GPU、CPU、内存和墙钟时限。</td>
+                    <td>定义分布式作业的物理规模。</td>
+                  </tr>
+                  <tr>
+                    <td>任务启动</td>
+                    <td>在被分配节点上启动进程，通常通过 <code>srun --mpi=pmix</code> 完成。</td>
+                    <td>取代更慢或更临时性的逐台主机 bootstrap 流程。</td>
+                  </tr>
+                  <tr>
+                    <td>设备隔离</td>
+                    <td><code>CUDA_VISIBLE_DEVICES</code> 和 cgroup 级别的设备过滤。</td>
+                    <td>确保每个任务只看到分配给它的 GPU。</td>
+                  </tr>
+                </tbody>
+              </table>
+              <p>
+                讲义还强调了术语的层级：作业（job）、任务（task）、rank、local rank 和命名空间（namespace）。这些不是词汇上的琐碎细节，而是启动路径的其余部分用来把进程绑定到设备、以及彼此绑定的句柄。
+              </p>
+              <pre class="lesson-pre"><code>#!/bin/bash
+#SBATCH --nodes=4
+#SBATCH --ntasks-per-node=8
+#SBATCH --gpus-per-task=1
+
+srun --mpi=pmix python train.py</code></pre>
+            </section>
+
+            <section class="lesson-chapter" id="pmix" data-reveal>
+              <h2>PMIx 解决的是启动之后、通信开始之前的那段时刻</h2>
+              <p>
+                一个刚启动的 rank 知道自己存在，但它不会自动知道 rank 0 在哪里、其他 rank 绑定到了哪个 GPU 或 NIC，也不知道通信器的 bootstrap 数据被发布到了哪里。PMIx 在这个阶段充当临时的数据交换层。
+              </p>
+              <table class="lesson-table" aria-label="PMIx 操作">
+                <thead>
+                  <tr>
+                    <th>操作</th>
+                    <th>目的</th>
+                    <th>在此流程中的典型用途</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code>PMIx_Put</code></td>
+                    <td>发布 bootstrap 元数据。</td>
+                    <td>rank 0 把 ID 或连接状态写入 PMIx 存储。</td>
+                  </tr>
+                  <tr>
+                    <td><code>PMIx_Commit</code></td>
+                    <td>推送本地数据，使其在目标作用域内可见。</td>
+                    <td>让已发布的 bootstrap 状态可被对等方读取。</td>
+                  </tr>
+                  <tr>
+                    <td><code>PMIx_Get</code></td>
+                    <td>取回其他参与者发布的数据。</td>
+                    <td>跟随 rank 取回 NCCL unique ID 或对等方元数据。</td>
+                  </tr>
+                  <tr>
+                    <td><code>PMIx_Fence</code></td>
+                    <td>在依赖它的启动流程继续之前设置同步点。</td>
+                    <td>防止某些 rank 在 bootstrap 状态全局可见之前抢先推进。</td>
+                  </tr>
+                </tbody>
+              </table>
+              <p>
+                local rank 是进入 CUDA 的一个格外重要的桥梁。由于 Slurm 会过滤并重新编号可见设备，进程通常把 <code>PMIX_LOCAL_RANK</code>
+                映射到过滤之后它能看到的那批 GPU 上，而不是节点上原始的物理编号。
+              </p>
+              <div class="lesson-note">
+                <p>
+                  <strong>值得记住的调试细节：</strong>如果每个任务只看到一个过滤后的设备，那么每个任务都可能报告自己运行在 GPU 0 上。在这种语境下，PCI 总线 ID 通常比可见的 CUDA 索引更可信。
+                </p>
+              </div>
+            </section>
+
+            <section class="lesson-chapter" id="nccl" data-reveal>
+              <h2>NCCL 把 bootstrap 元数据变成通信器和路由方案</h2>
+              <p>
+                在集合通信能运行之前，每个参与者都需要加入同一个通信器。幻灯片清楚地描述了常见模式：rank 0 创建一个 <code>ncclUniqueId</code>，通过 PMIx
+                发布它，对等方执行 fence 并取回它，然后每个 rank 用相同的 unique ID、world size 和 rank 调用 <code>ncclCommInitRank</code>。
+              </p>
+              <pre class="lesson-pre"><code>ncclUniqueId id;
+if (global_rank == 0) {
+  ncclGetUniqueId(&amp;id);
+  // publish through PMIx
+}
+
+// synchronize, retrieve, initialize
+ncclCommInitRank(&amp;comm, world_size, id, global_rank);</code></pre>
+              <p>
+                初始化之所以昂贵，是因为 ID 只是入口。NCCL 还必须构建真正的传输图：哪些对等方在本地，哪些路由应优先走 NVSwitch，哪些 NIC 承担节点间跳转，以及通信结构应该更像环形还是树形。
+              </p>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3>为什么 ID 重要</h3>
+                  <p>
+                    每个参与者必须持有完全相同的 unique ID，否则它们加入的就不是同一个通信器。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>为什么 fence 重要</h3>
+                  <p>
+                    PMIx 的可见性规则是实实在在的。只有在 rank 0 以正确的作用域发布并 commit 了通信器 bootstrap 状态之后，对等方才能安全地获取它。
+                  </p>
+                </article>
+              </div>
+              <p>
+                拆除同样重要。<code>ncclCommDestroy</code> 会把通信器标记为无效，并释放在初始化期间构建的暂存空间、映射和传输状态。
+              </p>
+            </section>
+
+            <section class="lesson-chapter" id="collectives" data-reveal>
+              <h2>集合通信是多 GPU 张量移动的真正语言</h2>
+              <p>
+                本课用集合通信的数据流模式来刻画 H100 集群，而不是手工的 send/receive。Broadcast、Reduce、AllReduce、AllGather、ReduceScatter 和 All-to-All 各自解决不同的张量移动问题，而这些模式直接映射到不同的训练策略上。
+              </p>
+              <table class="lesson-table" aria-label="NCCL 集合通信一览">
+                <thead>
+                  <tr>
+                    <th>原语</th>
+                    <th>它做什么</th>
+                    <th>典型用途</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Broadcast</td>
+                    <td>一个根 rank 把相同的数据发送给每个 rank。</td>
+                    <td>权重初始化、checkpoint 恢复、共享元数据分发。</td>
+                  </tr>
+                  <tr>
+                    <td>Reduce</td>
+                    <td>所有 rank 提供数值；一个根 rank 接收归约后的结果。</td>
+                    <td>集中式消费一个归约后的张量。</td>
+                  </tr>
+                  <tr>
+                    <td>AllReduce</td>
+                    <td>所有 rank 提供数据，并且所有 rank 都收到归约后的结果。</td>
+                    <td>数据并行训练中的梯度同步。</td>
+                  </tr>
+                  <tr>
+                    <td>AllGather</td>
+                    <td>每个 rank 提供一个分片，所有 rank 收到拼接后的完整数据。</td>
+                    <td>从分片重建完整的激活或参数。</td>
+                  </tr>
+                  <tr>
+                    <td>ReduceScatter</td>
+                    <td>先归约，再把归约结果的不相交切片分发出去。</td>
+                    <td>分片梯度或激活的流动，尤其在张量并行和序列并行（sequence parallelism）路径中。</td>
+                  </tr>
+                  <tr>
+                    <td>All-to-All</td>
+                    <td>每个 rank 都向其他每个 rank 发送不同的数据块。</td>
+                    <td>专家并行路由和 token 交换。</td>
+                  </tr>
+                </tbody>
+              </table>
+              <p>
+                讲义还强调，操作本身只是故事的一部分。数据类型、归约操作符、通信器和 CUDA 流都是调用签名的一部分，因为 NCCL 的设计意图是与 CUDA 执行模型的其他部分组合在一起，而不是游离于它之外。
+              </p>
+            </section>
+
+            <section class="lesson-chapter" id="parallelism" data-reveal>
+              <h2>四大并行模式本质上都是通信模式的选择</h2>
+              <p>
+                课程的最后一个概念动作，是把 AI 训练策略与它们所需的集合通信操作重新挂钩。数据并行、张量并行、流水线并行和专家并行不只是框架里的流行词。每一种都蕴含着特定的张量复制、分片和通信模式。
+              </p>
+              <div class="lesson-card-grid">
+                <article class="lesson-card">
+                  <h3>数据并行</h3>
+                  <p>
+                    在每个 GPU 上复制模型，并切分数据。其标志性集合通信操作是
+                    <code>AllReduce</code>，<code>Broadcast</code> 常用于初始化。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>张量并行</h3>
+                  <p>
+                    把大矩阵拆分到多个 GPU 上。根据分片方向以及是否引入序列并行，会用到 <code>AllGather</code>、
+                    <code>AllReduce</code> 和 <code>ReduceScatter</code>。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>流水线并行</h3>
+                  <p>
+                    按层把模型纵向拆分。随着微批次（micro-batch）流过流水线，通信变成了邻居与邻居之间的点对点流量。
+                  </p>
+                </article>
+                <article class="lesson-card">
+                  <h3>专家并行</h3>
+                  <p>
+                    把 token 路由到承载所选 expert 的那个 GPU。从这里开始，系统看起来更像大规模的 <code>All-to-All</code> 流量，而不是简单的复制式梯度交换。
+                  </p>
+                </article>
+              </div>
+              <p>
+                幻灯片中关于序列并行的讨论尤其重要，因为它展示了 <code>AllReduce</code> 通常可以分解为 <code>ReduceScatter + AllGather</code>，留出空间在分片的中间状态上做有用的工作，而不是立刻把所有东西都复制一遍。
+              </p>
+              <div class="lesson-note">
+                <p>
+                  <strong>最终的心智模型：</strong>一旦你知道每种并行策略需要哪个原语，你就能清晰地推理瓶颈到底是带宽（bandwidth）、延迟、拓扑还是缓冲，而不是把“分布式训练”当成一个不透明的步骤。
+                </p>
+              </div>
+            </section>
+
+            <section class="lesson-chapter" id="takeaways" data-reveal>
+              <h2>实践建议</h2>
+              <ol>
+                <li><strong>把各层职责分清楚。</strong>作业调度、bootstrap 元数据交换和集合通信的执行解决的是不同的问题，哪怕它们出现在同一条启动路径上。</li>
+                <li><strong>使用过滤后的本地视图来绑定 GPU。</strong>在 Slurm 应用了设备过滤之后，local rank 加上可见设备数量通常才是正确的输入。</li>
+                <li><strong>把通信器的建立当作一个真正的阶段。</strong>unique ID 只是开始；拓扑发现和路由构建才是启动开销的来源。</li>
+                <li><strong>根据张量模式选择集合通信操作，而不是凭习惯。</strong>一旦模型以不同方式被分片，AllReduce 就不再是每一个分布式步骤的万能答案。</li>
+                <li><strong>把这门课看作一部完整的阶梯。</strong>kernel 各课解释单个 GPU 如何保持忙碌，最后两课解释许多 GPU 如何变成一台训练机器。</li>
+              </ol>
+              <h3>术语表</h3>
+              <table class="lesson-table" aria-label="第 10 课术语表">
+                <tbody>
+                  <tr>
+                    <th>Slurm</th>
+                    <td>集群工作负载管理器和调度器，负责分配资源并启动任务。</td>
+                  </tr>
+                  <tr>
+                    <th>PMIx</th>
+                    <td>用于进程 bootstrap 和元数据交换的接口，用于启动后可扩展的对等方发现。</td>
+                  </tr>
+                  <tr>
+                    <th><code>ncclUniqueId</code></th>
+                    <td>在各 rank 之间共享的 bootstrap 令牌，使它们能加入同一个 NCCL 通信器。</td>
+                  </tr>
+                  <tr>
+                    <th>AllReduce</th>
+                    <td>一种集合通信操作：所有 rank 提供数据，且所有 rank 都收到归约后的结果。</td>
+                  </tr>
+                  <tr>
+                    <th>专家并行（Expert parallelism）</th>
+                    <td>一种分布式路由策略：token 被发送到承载被选中 experts 的那个设备。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </section>
+
+            <section class="lesson-chapter" id="continue" data-reveal>
+              <h2>课程收官</h2>
+              <p>
+                最后一课完成了闭环：Hopper 原语、kernel 流水线、调度器、节点互联 fabric
+                和分布式编排（orchestration）都是同一个机器模型的一部分。课程到这里就完整了，而这个网站现在把整条路径连接在一起，让你可以重访任何一步而不必跳出主 UI。
+              </p>
+              <div class="lesson-resource-grid">
+                <a class="lesson-resource-card" href="../../slides.html">
+                  <span class="lesson-resource-label">课程材料</span>
+                  <h3>浏览全部幻灯片</h3>
+                  <p>当你想要整门课与 Stream-K 附加部分的原始授课流程时，打开完整的幻灯片合集。</p>
+                </a>
+                <a class="lesson-resource-card" href="lesson-9.html">
+                  <span class="lesson-resource-label">上一课</span>
+                  <h3>多 GPU 第 1 部分</h3>
+                  <p>如果你想要这一编排层的硬件序言，回到 NVLink、NVSwitch、ConnectX、rail 与拓扑。</p>
+                </a>
+                <a
+                  class="lesson-resource-card"
+                  href="../../H100-Course/slides/10. Multi GPU  Part 2.pdf"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <span class="lesson-resource-label">原始幻灯片</span>
+                  <h3>打开多 GPU 第 2 部分</h3>
+                  <p>回到原始授课幻灯片，查看这最后一课页面背后未压缩的幻灯片序列。</p>
+                </a>
+                <a class="lesson-resource-card" href="../../index.html#explore">
+                  <span class="lesson-resource-label">探索</span>
+                  <h3>返回课程档案</h3>
+                  <p>返回主页，在不离开站内体验的情况下走完整个整合课程。</p>
+                </a>
+              </div>
+            </section>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <nav class="footer-nav" aria-label="页脚">
+        <a href="../../index.html#top">首页</a>
+        <a href="../../index.html#lessons">课程</a>
+        <a href="../../index.html#explore">探索</a>
+        <a href="../../index.html#visuals">可视化</a>
+        <a href="../../slides.html">幻灯片</a>
+      </nav>
+      <p>CUDA Programming for NVIDIA H100s</p>
+      <p>Prateek Shukla</p>
+    </footer>
+
+    <script src="../../script.js"></script>
+  </body>
+</html>
