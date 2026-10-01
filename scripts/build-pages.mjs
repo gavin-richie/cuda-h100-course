@@ -358,7 +358,7 @@ const zhLessonPages = [
 // Wire hreflang alternates between the English and Chinese version of each lesson.
 const allLessonPages = [...lessonPages, ...zhLessonPages];
 for (const lesson of allLessonPages) {
-  const base = lesson.file.replace(/^pages\//, "").replace(/\.html$/, "");
+  const base = lesson.file.replace(/^pages\/(zh\/)?/, "").replace(/\.html$/, "");
   lesson.alternates = [
     { lang: "en", path: `/pages/${base}.html` },
     { lang: "zh-CN", path: `/pages/zh/${base}.html` },
