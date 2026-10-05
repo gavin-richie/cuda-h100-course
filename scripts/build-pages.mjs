@@ -31,6 +31,24 @@ const courseTopics = [
   "multi-GPU orchestration",
 ];
 
+const zhSite = {
+  description:
+    "由 Prateek Shukla 主讲的 NVIDIA H100 高级 CUDA 课程简体中文版：Hopper 异步执行模型、TMA、cuTensorMap、cp.async.bulk、mbarrier、WGMMA、内核设计与多 GPU 编排。",
+  courseTopics: [
+    "Hopper 架构",
+    "异步执行",
+    "线程块集群",
+    "分布式共享内存",
+    "mbarrier",
+    "cuTensorMap",
+    "cp.async.bulk",
+    "WGMMA",
+    "warp 专用化内核设计",
+    "kernel 启动控制",
+    "多 GPU 编排",
+  ],
+};
+
 const homeFaqs = [
   {
     question: "Is this a beginner CUDA course?",
@@ -195,6 +213,34 @@ const lessonPages = [
 ];
 
 const rootFiles = ["index.html", "slides.html", "styles.css", "script.js", "favicon.svg", "social-card.svg", "social-card.png"];
+
+const zhHomeFaqs = [
+  {
+    question: "这是一门 CUDA 入门课程吗？",
+    answer:
+      "不是。课程假设你已经掌握 C 或 C++、能够阅读普通 CUDA kernel，想要的是 Hopper 专属的执行模型，而不是 CUDA 基础入门。",
+  },
+  {
+    question: "这门课到底教什么？",
+    answer:
+      "直接教 Hopper 与 H100 的机制：异步执行、mbarrier、线程块集群、分布式共享内存、cuTensorMap、cp.async.bulk、WGMMA、warp 专用化内核设计与多 GPU 编排。",
+  },
+  {
+    question: "课程覆盖 WGMMA 和张量内存加速器（TMA）吗？",
+    answer:
+      "覆盖。WGMMA 在第 6、7 课展开；TMA 与 cuTensorMap 在第 4、5 课作为 Hopper 描述符驱动的异步数据搬运模型的一部分讲解。",
+  },
+  {
+    question: "课程包含多 GPU 主题吗？",
+    answer:
+      "包含。第 9、10 课覆盖 NVLink、NVSwitch、拓扑、Slurm、PMIx、NCCL 通信器、集合通信与分布式训练模式。",
+  },
+  {
+    question: "为什么 H100 与旧的 CUDA 心智模型不同？",
+    answer:
+      "因为 Hopper 把编程模型推向重叠优先的执行：异步拷贝、屏障、等待逻辑、描述符驱动的搬运和 warpgroup 张量核心发射成为核心，而不是次要细节。",
+  },
+];
 
 const zhLessonPages = [
   {
@@ -410,6 +456,28 @@ const pageSeo = new Map([
       description: site.description,
       openGraphType: "website",
       tags: courseTopics,
+      alternates: [
+        { lang: "en", path: "/" },
+        { lang: "zh-CN", path: "/zh/" },
+      ],
+    },
+  ],
+  [
+    "zh/index.html",
+    {
+      kind: "home",
+      path: "/zh/",
+      title: "CUDA Programming for NVIDIA H100s | Hopper 中文课程",
+      socialTitle: "CUDA Programming for NVIDIA H100s（简体中文版）",
+      description: zhSite.description,
+      openGraphType: "website",
+      tags: zhSite.courseTopics,
+      lang: "zh-CN",
+      locale: "zh_CN",
+      alternates: [
+        { lang: "en", path: "/" },
+        { lang: "zh-CN", path: "/zh/" },
+      ],
     },
   ],
   [
@@ -423,6 +491,29 @@ const pageSeo = new Map([
         "Download the full slide decks for CUDA Programming for NVIDIA H100s, covering Hopper architecture, TMA, barriers, cp.async.bulk, WGMMA, kernel design, and multi-GPU systems.",
       openGraphType: "website",
       tags: ["course slides", "Hopper slides", "WGMMA", "TMA", "multi-GPU systems"],
+      alternates: [
+        { lang: "en", path: "/slides.html" },
+        { lang: "zh-CN", path: "/zh/slides.html" },
+      ],
+    },
+  ],
+  [
+    "zh/slides.html",
+    {
+      kind: "collection",
+      path: "/zh/slides.html",
+      title: "课程幻灯片 | CUDA Programming for NVIDIA H100s",
+      socialTitle: "课程幻灯片（简体中文版）| CUDA Programming for NVIDIA H100s",
+      description:
+        "CUDA Programming for NVIDIA H100s 全部课程幻灯片的简体中文版：Hopper 架构、TMA、屏障、cp.async.bulk、WGMMA、内核设计与多 GPU 系统，另附各课中文课程页入口。",
+      openGraphType: "website",
+      tags: ["课程幻灯片", "中文讲义", "WGMMA", "TMA", "多 GPU 系统"],
+      lang: "zh-CN",
+      locale: "zh_CN",
+      alternates: [
+        { lang: "en", path: "/slides.html" },
+        { lang: "zh-CN", path: "/zh/slides.html" },
+      ],
     },
   ],
   ...lessonPages.map((lesson) => [
@@ -602,6 +693,12 @@ function buildStructuredData(meta) {
   };
 
   if (meta.kind === "home") {
+    const isZh = meta.lang === "zh-CN";
+    const lang = isZh ? "zh-CN" : "en";
+    const homeDescription = isZh ? zhSite.description : site.description;
+    const topics = isZh ? zhSite.courseTopics : courseTopics;
+    const faqs = isZh ? zhHomeFaqs : homeFaqs;
+    const lessons = isZh ? zhLessonPages : lessonPages;
     return {
       "@context": "https://schema.org",
       "@graph": [
@@ -611,27 +708,27 @@ function buildStructuredData(meta) {
           "@id": `${homeUrl}#website`,
           url: homeUrl,
           name: site.name,
-          description: site.description,
-          inLanguage: "en",
+          description: homeDescription,
+          inLanguage: lang,
           author: { "@id": `${homeUrl}#person` },
         },
         {
           "@type": "Course",
           "@id": `${homeUrl}#course`,
           name: site.name,
-          description: site.description,
+          description: homeDescription,
           url: homeUrl,
           provider: { "@id": `${homeUrl}#person` },
-          inLanguage: "en",
+          inLanguage: lang,
           educationalLevel: "Advanced",
           courseMode: "online",
-          teaches: courseTopics,
+          teaches: topics,
         },
         {
           "@type": "ItemList",
           "@id": `${homeUrl}#lessons`,
-          name: "Course lessons",
-          itemListElement: lessonPages.map((lesson, index) => ({
+          name: isZh ? "课程单元" : "Course lessons",
+          itemListElement: lessons.map((lesson, index) => ({
             "@type": "ListItem",
             position: index + 1,
             url: absoluteUrl(lesson.path),
@@ -642,7 +739,7 @@ function buildStructuredData(meta) {
           "@type": "FAQPage",
           "@id": `${homeUrl}#faq`,
           url: homeUrl,
-          mainEntity: homeFaqs.map((entry) => ({
+          mainEntity: faqs.map((entry) => ({
             "@type": "Question",
             name: entry.question,
             acceptedAnswer: {
@@ -749,7 +846,8 @@ function renderSeoBlock(meta) {
     tags.push(`    <link rel="alternate" hreflang="${escapeHtml(alt.lang)}" href="${escapeHtml(absoluteUrl(alt.path))}">`);
   }
   if (meta.alternates?.length) {
-    tags.push(`    <link rel="alternate" hreflang="x-default" href="${escapeHtml(absoluteUrl(meta.path))}">`);
+    const defaultAlternate = meta.alternates.find((alt) => alt.lang === "en") ?? { path: meta.path };
+    tags.push(`    <link rel="alternate" hreflang="x-default" href="${escapeHtml(absoluteUrl(defaultAlternate.path))}">`);
   }
   if (meta.locale && meta.locale !== "en_US") {
     tags.push('    <meta property="og:locale:alternate" content="en_US">');
@@ -905,6 +1003,9 @@ async function build() {
     await copyRelative(file);
   }
 
+  await copyRelative("zh", "zh", { optional: true });
+  await copyRelative("slides-zh", "H100-Course/slides-zh", { optional: true });
+
   await copyRelative("markdown", "markdown", { optional: true });
   await copyRelative("preview-snaps", "preview-snaps", { optional: true });
 
@@ -923,7 +1024,7 @@ async function build() {
     await copyRelative(path.join("files", file), undefined, { optional: true });
   }
 
-  const htmlFilesToOptimize = ["index.html", "slides.html", ...pageFiles];
+  const htmlFilesToOptimize = ["index.html", "zh/index.html", "slides.html", "zh/slides.html", ...pageFiles];
 
   for (const htmlFile of htmlFilesToOptimize) {
     await optimizeHtml(htmlFile);

@@ -1,0 +1,917 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+      name="description"
+      content="由 Prateek Shukla 主讲的 CUDA Programming for NVIDIA H100s 课程。一个围绕 Hopper 异步执行模型构建的高端技术课程站点。"
+    >
+    <meta name="google-site-verification" content="vZkLaK2uRxDHIjs36g5F9lORlgcfzdWbxrDm97py3W4">
+    <meta name="theme-color" content="#08111d">
+    <title>CUDA Programming for NVIDIA H100s | Hopper 中文课程</title>
+    <link rel="icon" href="../favicon.svg" type="image/svg+xml">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&family=Urbanist:wght@500;600;700;800&display=swap"
+      rel="stylesheet"
+    >
+    <link rel="stylesheet" href="../styles.css">
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="header-mark" href="#top" aria-label="CUDA Programming for NVIDIA H100s">
+        <span>Prateek Shukla</span>
+        <span>CUDA Programming for NVIDIA H100s</span>
+      </a>
+      <button
+        class="nav-toggle"
+        type="button"
+        aria-expanded="false"
+        aria-controls="site-nav"
+        aria-label="打开导航"
+      >
+        <span class="nav-toggle-label">菜单</span>
+        <span class="nav-toggle-icon" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
+        </span>
+      </button>
+      <nav class="site-nav" id="site-nav" aria-label="主导航">
+        <a href="#lessons">课程</a>
+        <a href="#explore">深度解读</a>
+        <a href="#visuals">可视化</a>
+        <a href="#code">代码</a>
+        <a href="slides.html">幻灯片</a>
+        <div class="lang-select" data-lang-select>
+          <label class="lang-select-label" for="lang-select-home">语言</label>
+          <select id="lang-select-home" aria-label="语言">
+            <option value="../index.html" lang="en">English</option>
+            <option value="index.html" selected lang="zh-CN">Simplified Chinese</option>
+          </select>
+        </div>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-backdrop" aria-hidden="true">
+          <svg class="hero-diagram" viewBox="0 0 1600 960" preserveAspectRatio="xMidYMid slice">
+            <defs>
+              <pattern id="hero-grid" width="64" height="64" patternUnits="userSpaceOnUse">
+                <path d="M 64 0 L 0 0 0 64" fill="none" stroke="rgba(129, 155, 183, 0.18)" stroke-width="1"/>
+              </pattern>
+              <linearGradient id="signal-line" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stop-color="#79d3ff" stop-opacity="0"/>
+                <stop offset="35%" stop-color="#79d3ff" stop-opacity="0.85"/>
+                <stop offset="68%" stop-color="#a6ff6b" stop-opacity="0.9"/>
+                <stop offset="100%" stop-color="#ff9b61" stop-opacity="0"/>
+              </linearGradient>
+              <linearGradient id="module-fill" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#0e1c2b" stop-opacity="0.96"/>
+                <stop offset="100%" stop-color="#08121d" stop-opacity="0.65"/>
+              </linearGradient>
+              <filter id="soft-glow" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur stdDeviation="10" result="blur"/>
+                <feMerge>
+                  <feMergeNode in="blur"/>
+                  <feMergeNode in="SourceGraphic"/>
+                </feMerge>
+              </filter>
+            </defs>
+
+            <rect x="0" y="0" width="1600" height="960" fill="url(#hero-grid)" opacity="0.52"/>
+
+            <g class="diagram-wash">
+              <ellipse cx="1140" cy="260" rx="420" ry="250" fill="#79d3ff" opacity="0.08"/>
+              <ellipse cx="1080" cy="680" rx="520" ry="220" fill="#a6ff6b" opacity="0.08"/>
+              <ellipse cx="280" cy="860" rx="360" ry="220" fill="#ff8f52" opacity="0.1"/>
+            </g>
+
+            <g class="diagram-lanes" filter="url(#soft-glow)">
+              <path class="flow-path flow-path-a" d="M 80 756 C 280 756, 430 690, 548 598 S 842 372, 1020 372 S 1360 430, 1530 296"/>
+              <path class="flow-path flow-path-b" d="M 110 668 C 270 668, 432 616, 582 518 S 886 286, 1088 286 S 1380 322, 1524 202"/>
+              <path class="flow-path flow-path-c" d="M 492 832 C 704 832, 856 742, 1006 596 S 1260 366, 1514 366"/>
+              <path class="flow-path flow-path-d" d="M 736 168 C 894 168, 1026 212, 1120 314 S 1280 558, 1516 558"/>
+            </g>
+
+            <g class="diagram-modules">
+              <g class="module memory-bank">
+                <rect x="74" y="610" width="356" height="226" rx="28"/>
+                <text x="116" y="682">HBM / 全局内存</text>
+                <text x="116" y="726">stride、tile、批量搬运</text>
+                <path d="M 118 764 H 386" class="module-rule"/>
+                <path d="M 118 790 H 356" class="module-rule"/>
+                <path d="M 118 816 H 318" class="module-rule"/>
+              </g>
+
+              <g class="module tma-spine">
+                <rect x="520" y="180" width="174" height="568" rx="34"/>
+                <text x="564" y="270">TMA</text>
+                <text x="564" y="308">描述符路径</text>
+                <path d="M 570 356 V 654" class="module-column"/>
+                <circle cx="570" cy="410" r="10" class="module-node"/>
+                <circle cx="570" cy="508" r="10" class="module-node"/>
+                <circle cx="570" cy="606" r="10" class="module-node"/>
+                <text x="598" y="414">cuTensorMap</text>
+                <text x="598" y="512">cp.async.bulk</text>
+                <text x="598" y="610">barrier 到达</text>
+              </g>
+
+              <g class="module sync-rail">
+                <rect x="198" y="120" width="428" height="110" rx="22"/>
+                <text x="246" y="176">mbarrier / wait group / fence</text>
+                <text x="246" y="208">重叠下的正确性</text>
+              </g>
+
+              <g class="module smem-core">
+                <rect x="760" y="294" width="310" height="272" rx="34"/>
+                <text x="816" y="372">共享内存 TILE</text>
+                <text x="816" y="412">swizzle、布局、循环暂存</text>
+                <path d="M 820 454 H 1012" class="module-rule"/>
+                <path d="M 820 490 H 976" class="module-rule"/>
+                <path d="M 820 526 H 936" class="module-rule"/>
+              </g>
+
+              <g class="module tensor-array">
+                <rect x="1088" y="126" width="430" height="286" rx="40"/>
+                <text x="1146" y="210">WGMMA / 张量核心阵列</text>
+                <text x="1146" y="250">warpgroup 发射、提交、等待</text>
+                <g class="matrix-grid">
+                  <circle cx="1176" cy="306" r="8"/>
+                  <circle cx="1228" cy="306" r="8"/>
+                  <circle cx="1280" cy="306" r="8"/>
+                  <circle cx="1332" cy="306" r="8"/>
+                  <circle cx="1384" cy="306" r="8"/>
+                  <circle cx="1436" cy="306" r="8"/>
+                  <circle cx="1488" cy="306" r="8"/>
+                  <circle cx="1176" cy="350" r="8"/>
+                  <circle cx="1228" cy="350" r="8"/>
+                  <circle cx="1280" cy="350" r="8"/>
+                  <circle cx="1332" cy="350" r="8"/>
+                  <circle cx="1384" cy="350" r="8"/>
+                  <circle cx="1436" cy="350" r="8"/>
+                  <circle cx="1488" cy="350" r="8"/>
+                </g>
+              </g>
+
+              <g class="module cluster-fabric">
+                <rect x="1068" y="572" width="470" height="230" rx="36"/>
+                <text x="1132" y="648">集群 FABRIC / 多 GPU</text>
+                <text x="1132" y="690">DSM, Stream-K, NVLink, NCCL, Slurm</text>
+                <path d="M 1134 736 H 1490" class="module-rule"/>
+                <path d="M 1134 764 H 1450" class="module-rule"/>
+              </g>
+            </g>
+
+            <g class="diagram-connectors">
+              <circle cx="430" cy="708" r="12"/>
+              <circle cx="694" cy="602" r="12"/>
+              <circle cx="1070" cy="364" r="12"/>
+              <circle cx="1088" cy="622" r="12"/>
+              <circle cx="1516" cy="558" r="12"/>
+            </g>
+          </svg>
+        </div>
+
+        <div class="hero-scrim" aria-hidden="true"></div>
+
+        <div class="hero-content section-shell">
+          <div class="hero-layout">
+            <div class="hero-copy">
+              <p class="hero-credit">Prateek Shukla 出品的课程</p>
+              <h1 class="hero-title" id="hero-title">
+                <span>CUDA</span>
+                <span>Programming</span>
+                <span>for NVIDIA</span>
+                <span class="hero-title-emphasis">H100s</span>
+              </h1>
+              <p class="hero-summary">
+                把 Hopper 当作一台异步机器来讲授：<code>mbarrier</code>、<code>cp.async.bulk</code>、TMA、
+                WGMMA、warp 专用化内核与多 GPU 编排。
+              </p>
+              <div class="hero-actions">
+                <a class="button button-primary" href="#lessons">探索全部 10 课</a>
+                <a
+                  class="button button-secondary"
+                  href="slides.html"
+                >
+                  浏览全部幻灯片
+                </a>
+              </div>
+              <div class="hero-proof" aria-label="课程核心要点">
+                <span>10 节课</span>
+                <span>CUTLASS SM90 内核</span>
+                <span>PTX 级原语</span>
+                <span>多 GPU 编排</span>
+              </div>
+            </div>
+
+            <aside class="hero-video-panel" aria-label="内嵌 YouTube 课程视频">
+              <div class="hero-video-header">
+                <p class="hero-video-kicker">完整课程</p>
+                <a
+                  class="hero-video-link"
+                  href="https://www.youtube.com/watch?v=SqQUQHdYWyc"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  在 YouTube 打开
+                </a>
+              </div>
+              <div class="hero-video-shell">
+                <div class="hero-video-window">
+                  <iframe
+                    src="https://www.youtube-nocookie.com/embed/SqQUQHdYWyc?rel=0"
+                    title="Prateek Shukla 的 CUDA Programming for NVIDIA H100s 完整课程视频"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                    referrerpolicy="strict-origin-when-cross-origin"
+                    allowfullscreen
+                  ></iframe>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </section>
+
+      <section class="statement" id="why" data-reveal>
+        <div class="section-shell">
+          <div class="section-head">
+            <p class="section-kicker">为什么要有这门课</p>
+            <h2>Hopper 改变的是编程模型，而不只是吞吐数字。</h2>
+            <p>
+              本站关注 Hopper 的真实工作方式：异步执行、描述符驱动的数据搬运、同步语义、张量核心数据流，
+              以及 H100 规模所要求的分布式系统上下文。
+            </p>
+          </div>
+
+          <div class="principles">
+            <article class="principle" data-reveal>
+              <p class="principle-index">01</p>
+              <div>
+                <h3>异步执行是整个故事的核心。</h3>
+                <p>
+                  过去的 CUDA 直觉把发射和完成几乎当成同一个心智单元。Hopper 让重叠（overlap）、等待逻辑
+                  与生产者/消费者协调成为日常内核设计的一部分。
+                </p>
+              </div>
+            </article>
+
+            <article class="principle" data-reveal>
+              <p class="principle-index">02</p>
+              <div>
+                <h3>数据搬运是一等公民级别的优化面。</h3>
+                <p>
+                  当你想让张量核心持续有数据可算时，TMA 描述符、swizzle、布局选择、共享内存暂存
+                  以及与 barrier 关联的传输，和数学运算本身同样重要。
+                </p>
+              </div>
+            </article>
+
+            <article class="principle" data-reveal>
+              <p class="principle-index">03</p>
+              <div>
+                <h3>规模是架构的一部分，不是可选附录。</h3>
+                <p>
+                  NVLink、Stream-K 调度、NCCL 初始化、PMIx 和 Slurm 会出现在课程里，因为真实的训练系统
+                  不会止步于单 GPU，心智模型也不应该。
+                </p>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="syllabus" id="lessons" data-reveal>
+        <div class="section-shell">
+          <div class="section-head section-head-dark">
+            <p class="section-kicker">课程结构</p>
+            <h2>十节课，编排成一次深入异步机器的攀登。</h2>
+            <p>
+              课程从架构和状态空间开始，随后经过屏障、TMA、WGMMA、计算受限型内核设计，
+              最后到达分布式编排栈。
+            </p>
+          </div>
+
+          <ol class="lesson-list">
+            <li class="lesson-item" data-reveal style="--lesson-accent: #79d3ff">
+              <a class="lesson-link" href="../pages/zh/lesson-1.html">
+                <span class="lesson-number">01</span>
+                <h3>H100 简介</h3>
+                <p>架构、内存层级、执行层级，以及转向异步思维的转变。</p>
+              </a>
+              <a class="lesson-deck-link" href="../H100-Course/slides-zh/1. Introduction to H100.pdf" target="_blank" rel="noreferrer">中文幻灯片 PDF ↗</a>
+            </li>
+            <li class="lesson-item" data-reveal style="--lesson-accent: #8ed6ff">
+              <a class="lesson-link" href="../pages/zh/lesson-2.html">
+                <span class="lesson-number">02</span>
+                <h3>集群、数据类型、内联 PTX 与指针</h3>
+                <p>线程块集群、分布式共享内存、状态空间与地址空间转换。</p>
+              </a>
+              <a class="lesson-deck-link" href="../H100-Course/slides-zh/2. Clusters, Data types, inline PTX, State Spaces.pdf" target="_blank" rel="noreferrer">中文幻灯片 PDF ↗</a>
+            </li>
+            <li class="lesson-item" data-reveal style="--lesson-accent: #ffd166">
+              <a class="lesson-link" href="../pages/zh/lesson-3.html">
+                <span class="lesson-number">03</span>
+                <h3>异步与屏障</h3>
+                <p>延迟隐藏、<code>mbarrier</code>、生产者/消费者冒险、等待模式与重叠下的正确性。</p>
+              </a>
+              <a class="lesson-deck-link" href="../H100-Course/slides-zh/3. Asynchronicity and barriers.pdf" target="_blank" rel="noreferrer">中文幻灯片 PDF ↗</a>
+            </li>
+            <li class="lesson-item" data-reveal style="--lesson-accent: #79d3ff">
+              <a class="lesson-link" href="../pages/zh/lesson-4.html">
+                <span class="lesson-number">04</span>
+                <h3>cuTensorMap</h3>
+                <p>TMA 描述符、张量形状与 stride、swizzle、交织（interleaving）与描述符驱动的传输。</p>
+              </a>
+              <a class="lesson-deck-link" href="../H100-Course/slides-zh/4. cuTensorMap.pdf" target="_blank" rel="noreferrer">中文幻灯片 PDF ↗</a>
+            </li>
+            <li class="lesson-item" data-reveal style="--lesson-accent: #7fffd4">
+              <a class="lesson-link" href="../pages/zh/lesson-5.html">
+                <span class="lesson-number">05</span>
+                <h3><code>cp.async.bulk</code></h3>
+                <p>批量异步拷贝、multicast、预取、规约与基于 barrier 的完成语义。</p>
+              </a>
+              <a class="lesson-deck-link" href="../H100-Course/slides-zh/5. cp.async.bulk.pdf" target="_blank" rel="noreferrer">中文幻灯片 PDF ↗</a>
+            </li>
+            <li class="lesson-item" data-reveal style="--lesson-accent: #c5ff74">
+              <a class="lesson-link" href="../pages/zh/lesson-6.html">
+                <span class="lesson-number">06</span>
+                <h3>WGMMA Part 1</h3>
+                <p>warpgroup、<code>wgmma.mma_async</code>、寄存器与共享内存两种操作数来源，以及张量核心数据流。</p>
+              </a>
+              <a class="lesson-deck-link" href="../H100-Course/slides-zh/6. WGMMA-1.pdf" target="_blank" rel="noreferrer">中文幻灯片 PDF ↗</a>
+            </li>
+            <li class="lesson-item" data-reveal style="--lesson-accent: #ffb86c">
+              <a class="lesson-link" href="../pages/zh/lesson-7.html">
+                <span class="lesson-number">07</span>
+                <h3>WGMMA Part 2</h3>
+                <p>commit 与 wait group、FP8 行为、<code>stmatrix</code>、打包（packing）与稀疏 WGMMA 约束。</p>
+              </a>
+              <a class="lesson-deck-link" href="../H100-Course/slides-zh/7. Wgmma part 2.pdf" target="_blank" rel="noreferrer">中文幻灯片 PDF ↗</a>
+            </li>
+            <li class="lesson-item" data-reveal style="--lesson-accent: #79d3ff">
+              <a class="lesson-link" href="../pages/zh/lesson-8.html">
+                <span class="lesson-number">08</span>
+                <h3>内核设计</h3>
+                <p>warp 专用化、流水线化、循环缓冲、持久调度、Stream-K 与启动策略。</p>
+              </a>
+              <a class="lesson-deck-link" href="../H100-Course/slides-zh/8. Kernel Design.pdf" target="_blank" rel="noreferrer">中文幻灯片 PDF ↗</a>
+            </li>
+            <li class="lesson-item" data-reveal style="--lesson-accent: #ffd166">
+              <a class="lesson-link" href="../pages/zh/lesson-9.html">
+                <span class="lesson-number">09</span>
+                <h3>多 GPU 第 1 部分</h3>
+                <p>NVLink、NVSwitch、拓扑、瓶颈，以及为什么扩展会改变你推理这台机器的方式。</p>
+              </a>
+              <a class="lesson-deck-link" href="../H100-Course/slides-zh/9. Multi GPU.pdf" target="_blank" rel="noreferrer">中文幻灯片 PDF ↗</a>
+            </li>
+            <li class="lesson-item" data-reveal style="--lesson-accent: #ff9b61">
+              <a class="lesson-link" href="../pages/zh/lesson-10.html">
+                <span class="lesson-number">10</span>
+                <h3>多 GPU 第 2 部分</h3>
+                <p>Slurm、PMIx、NCCL 通信器、集合通信，以及大型训练系统背后的编排。</p>
+              </a>
+              <a class="lesson-deck-link" href="../H100-Course/slides-zh/10. Multi GPU  Part 2.pdf" target="_blank" rel="noreferrer">中文幻灯片 PDF ↗</a>
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="lesson-explore" id="explore" data-reveal>
+        <div class="section-shell">
+          <div class="section-head section-head-dark">
+            <p class="section-kicker">深度解读</p>
+            <h2>四条经过刻意设计的课程入口。</h2>
+            <p>
+              上面的课程表展示了完整的攀登路线。这一节收得更紧：四个高信息量的入口，
+              覆盖机器模型、同步、内核设计与分布式编排，同时不把首页变成又一份完整的课程索引。
+            </p>
+          </div>
+
+          <div class="explore-grid">
+            <article class="explore-card explore-card-architecture" data-reveal>
+              <p class="explore-index">第 01 课</p>
+              <h3>H100 简介</h3>
+              <p class="explore-summary">
+                先把 Hopper 当作一台机器来看：架构、内存层级、SMSP、张量核心、调度器，
+                以及异步执行为什么改变了后续课程的阅读方式。
+              </p>
+              <ul class="explore-list">
+                <li>建立从 HBM 经 L2、共享内存到寄存器的内存路径心智模型。</li>
+                <li>先看清 TMA 和 WGMMA 的位置，后面的课程再把它们变成具体的内核机制。</li>
+                <li>把整门课锚定在利用率、重叠（overlap）与 GPU 真实的执行层级上。</li>
+              </ul>
+              <div class="explore-tags" aria-label="第 1 课主题">
+                <span>Hopper</span>
+                <span>内存层级</span>
+                <span>TMA</span>
+                <span>WGMMA</span>
+              </div>
+              <div class="explore-actions">
+                <a class="button button-primary" href="../pages/zh/lesson-1.html">打开课程页</a>
+                <a
+                  class="button button-secondary"
+                  href="../H100-Course/slides-zh/1. Introduction to H100.pdf"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  打开中文幻灯片
+                </a>
+              </div>
+            </article>
+
+            <article class="explore-card explore-card-barriers" data-reveal>
+              <p class="explore-index">第 03 课</p>
+              <h3>异步与屏障</h3>
+              <p class="explore-summary">
+                从架构进入同步：proxy 分离、RAW 与 WAR 冒险、<code>mbarrier</code>、
+                集群 barrier、异步组，以及让重叠（overlap）正确而非碰巧正确的规则。
+              </p>
+              <ul class="explore-list">
+                <li>理解 Hopper 为什么需要跨通用 proxy 与异步 proxy 的显式可见性和顺序性。</li>
+                <li>弄清 <code>mbarrier</code> 追踪什么、phase 如何翻转，以及 acquire 语义为什么重要。</li>
+                <li>把 TMA、<code>cp.async.bulk</code>、WGMMA 消费与共享内存所有权交接串联起来。</li>
+              </ul>
+              <div class="explore-tags" aria-label="第 3 课主题">
+                <span>mbarrier</span>
+                <span>fence.proxy.async</span>
+                <span>集群 barrier</span>
+                <span>wait_group</span>
+              </div>
+              <div class="explore-actions">
+                <a class="button button-primary" href="../pages/zh/lesson-3.html">打开课程页</a>
+                <a
+                  class="button button-secondary"
+                  href="../H100-Course/slides-zh/3. Asynchronicity and barriers.pdf"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  打开中文幻灯片
+                </a>
+              </div>
+            </article>
+
+            <article class="explore-card explore-card-kernel-design" data-reveal>
+              <p class="explore-index">第 08 课</p>
+              <h3>内核设计</h3>
+              <p class="explore-summary">
+                从原语迈向完整内核：算术强度、warp 专用化、循环缓冲、cooperative 与 ping-pong 流水线、
+                持久调度、Stream-K、集群 multicast 与 epilogue 设计。
+              </p>
+              <ul class="explore-list">
+                <li>判断内核何时受计算限制、何时受内存限制，以及每种情形下哪些旋钮真正起作用。</li>
+                <li>把 cooperative 与 ping-pong 流水线当作利用率策略来对比，而不是可互换的模板名。</li>
+                <li>把持久调度器、Stream-K fixup 与 epilogue 交接对应到仓库里真实的 SM90 内核文件。</li>
+              </ul>
+              <div class="explore-tags" aria-label="第 8 课主题">
+                <span>warp 专用化</span>
+                <span>Stream-K</span>
+                <span>持久</span>
+                <span>Epilogue</span>
+              </div>
+              <div class="explore-actions">
+                <a class="button button-primary" href="../pages/zh/lesson-8.html">打开课程页</a>
+                <a
+                  class="button button-secondary"
+                  href="../H100-Course/slides-zh/8. Kernel Design.pdf"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  打开中文幻灯片
+                </a>
+              </div>
+            </article>
+
+            <article class="explore-card explore-card-orchestration" data-reveal>
+              <p class="explore-index">第 10 课</p>
+              <h3>多 GPU 第 2 部分</h3>
+              <p class="explore-summary">
+                终点是编排层：Slurm 作业控制、PMIx 引导、<code>CUDA_VISIBLE_DEVICES</code> 下的 GPU 绑定、
+                NCCL 通信器初始化、集合通信原语，以及真正用上第 9 课互连结构（fabric）的并行策略。
+              </p>
+              <ul class="explore-list">
+                <li>理解资源分配、对等发现与通信器创建如何组合成一条启动路径。</li>
+                <li>看清 NCCL 为什么用集合通信和拓扑感知路由思考，而不是手工点对点拷贝。</li>
+                <li>把数据并行、张量并行、流水线并行与专家并行对应回它们需要的具体通信原语。</li>
+              </ul>
+              <div class="explore-tags" aria-label="第 10 课主题">
+                <span>Slurm</span>
+                <span>PMIx</span>
+                <span>NCCL</span>
+                <span>集合通信</span>
+              </div>
+              <div class="explore-actions">
+                <a class="button button-primary" href="../pages/zh/lesson-10.html">打开课程页</a>
+                <a
+                  class="button button-secondary"
+                  href="../H100-Course/slides-zh/10. Multi GPU  Part 2.pdf"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  打开中文幻灯片
+                </a>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="pipeline-reality" id="pipelines" data-reveal>
+        <div class="section-shell">
+          <div class="section-head">
+            <p class="section-kicker">代码现实</p>
+            <h2>课程反复回到流水线，因为内核文件本身就是这么写的。</h2>
+            <p>
+              这些内容有相当一部分不是孤立的幻灯片，而是去读描述符、屏障、warpgroup 数学、调度
+              与实测内核如何变成代码中的具体结构。在下面任选一条线索，
+              看流水线在真实文件里成形。
+            </p>
+          </div>
+
+          <div class="pipeline-app" data-pipeline-root data-reveal>
+            <div class="pipeline-selector" data-pipeline-selector role="tablist" aria-label="流水线概念"></div>
+            <div class="pipeline-stage-strip" data-pipeline-stages aria-live="polite"></div>
+
+            <div class="pipeline-panel">
+              <div class="pipeline-copy">
+                <p class="pipeline-filepath" data-pipeline-path></p>
+                <h3 class="pipeline-title" data-pipeline-title></h3>
+                <p class="pipeline-description" data-pipeline-description></p>
+                <ul class="pipeline-points" data-pipeline-points></ul>
+                <div class="pipeline-actions">
+                  <a class="button button-primary" data-pipeline-link target="_blank" rel="noreferrer">打开完整文件</a>
+                  <span class="pipeline-lines" data-pipeline-lines></span>
+                </div>
+              </div>
+
+              <div class="pipeline-code-window">
+                <div class="pipeline-code-meta">
+                  <span data-pipeline-filetag></span>
+                  <span data-pipeline-linetag></span>
+                </div>
+                <pre class="pipeline-code" aria-live="polite"><code data-pipeline-code></code></pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="code-anchors" id="code" data-reveal>
+        <div class="section-shell">
+          <div class="section-head">
+            <p class="section-kicker">代码锚点</p>
+            <h2>课程始终贴近内核源码。</h2>
+            <p>
+              这些参考文件就在仓库里。课程正是在这里把架构图与调度器逻辑、共享内存布局、
+              描述符构造和实测内核连接起来。
+            </p>
+          </div>
+
+          <div class="anchor-list">
+            <article class="anchor-row" data-reveal>
+              <a class="anchor-file" href="../files/sm90_gemm_tma_warpspecialized_pingpong.hpp" target="_blank" rel="noreferrer">
+                sm90_gemm_tma_warpspecialized_pingpong.hpp
+              </a>
+              <p>
+                一个 CUTLASS SM90 内核：ping-pong 分阶段暂存、warp 专用化的生产者与计算组、
+                有序序列屏障，以及与调度器联动的共享存储。
+              </p>
+            </article>
+
+            <article class="anchor-row" data-reveal>
+              <a class="anchor-file" href="../files/sm90_tile_scheduler_stream_k.hpp" target="_blank" rel="noreferrer">
+                sm90_tile_scheduler_stream_k.hpp
+              </a>
+              <p>
+                持久 Stream-K 分解、工作 tile 记账、规约单元，
+                以及决定工作如何跨机器流动的调度器规则。
+              </p>
+            </article>
+
+            <article class="anchor-row" data-reveal>
+              <a class="anchor-file" href="../files/fast.cu/examples/matmul/matmul_12.cuh" target="_blank" rel="noreferrer">
+                fast.cu/examples/matmul/matmul_12.cuh
+              </a>
+              <p>
+                共享内存矩阵描述符、内联 PTX、显式 warpgroup fence，
+                以及在 bf16 GEMM 内核中直接使用 <code>wgmma.mma_async</code>。
+              </p>
+            </article>
+
+            <article class="anchor-row" data-reveal>
+              <a class="anchor-file" href="../files/fast.cu/README.md" target="_blank" rel="noreferrer">
+                fast.cu/README.md
+              </a>
+              <p>
+                从零实现的内核与实测 bf16 matmul 结果，
+                其中包括在部分 H100 矩阵规模上超过 cuBLAS 的运行。
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="visual-labs" id="visuals" data-reveal>
+        <div class="section-shell">
+        <div class="section-head section-head-dark">
+          <p class="section-kicker">交互式可视化</p>
+          <h2>窥见课程背后教学工具的几个小型实时窗口。</h2>
+          <p>
+            这些配套可视化已经在 GitHub Pages 上线。首页现在让它们更轻量：
+            每个预览按需内联加载，需要独立交互版时可打开完整视图链接。
+          </p>
+        </div>
+
+          <div class="lab-list">
+            <article class="lab-item" data-reveal>
+              <div class="lab-copy">
+                <p class="lab-index">01</p>
+                <h3>Rasterization + Swizzle Visualizer</h3>
+                <p>
+                  来自 <code>rasterization.cu</code> 的 tile 遍历、带填充的网格、
+                  swizzle 后的集群 ID 与持久 block 映射。
+                </p>
+                <a class="button button-secondary" href="https://cudacourseh100.github.io/raster/" target="_blank" rel="noreferrer">
+                  打开光栅化可视化
+                </a>
+              </div>
+              <div class="lab-preview-shell">
+                <div class="lab-preview-meta">
+                  <span>快照</span>
+                  <span>Tile 调度工作台</span>
+                </div>
+                <img class="lab-preview-image" src="../preview-snaps/raster.png" alt="光栅化与 swizzle 可视化预览" loading="lazy">
+              </div>
+            </article>
+
+            <article class="lab-item" data-reveal>
+              <div class="lab-copy">
+                <p class="lab-index">02</p>
+                <h3>H100 GPU Architecture</h3>
+                <p>
+                  一个专门的架构可视化，用于把 Hopper 当作机器来读：主要结构、层级，
+                  以及课程反复回访的芯片级层面。
+                </p>
+                <a class="button button-secondary" href="https://cudacourseh100.github.io/h100visu/" target="_blank" rel="noreferrer">
+                  打开 H100 可视化
+                </a>
+              </div>
+              <div class="lab-preview-shell">
+                <div class="lab-preview-meta">
+                  <span>快照</span>
+                  <span>架构视图</span>
+                </div>
+                <img class="lab-preview-image" src="../preview-snaps/h100visu.png" alt="H100 GPU 架构可视化预览" loading="lazy">
+              </div>
+            </article>
+
+            <article class="lab-item" data-reveal>
+              <div class="lab-copy">
+                <p class="lab-index">03</p>
+                <h3>DGX H100 Node Architecture</h3>
+                <p>
+                  节点级的系统视图：GPU、互连结构（fabric），
+                  以及课程走出单设备之后真正重要的拓扑上下文。
+                </p>
+                <a class="button button-secondary" href="https://cudacourseh100.github.io/dgxvisu/" target="_blank" rel="noreferrer">
+                  打开 DGX 可视化
+                </a>
+              </div>
+              <div class="lab-preview-shell">
+                <div class="lab-preview-meta">
+                  <span>快照</span>
+                  <span>节点拓扑</span>
+                </div>
+                <img class="lab-preview-image" src="../preview-snaps/dgxvisu.png" alt="DGX H100 节点架构可视化预览" loading="lazy">
+              </div>
+            </article>
+
+            <article class="lab-item" data-reveal>
+              <div class="lab-copy">
+                <p class="lab-index">04</p>
+                <h3>WGMMA Lifecycle</h3>
+                <p>
+                  以滚动叙事方式讲解 Hopper 上的 WGMMA 操作、swizzle、描述符
+                  与异步加载行为。
+                </p>
+                <a class="button button-secondary" href="https://cudacourseh100.github.io/wgmmavisu/" target="_blank" rel="noreferrer">
+                  打开 WGMMA 可视化
+                </a>
+              </div>
+              <div class="lab-preview-shell">
+                <div class="lab-preview-meta">
+                  <span>快照</span>
+                  <span>生命周期讲解</span>
+                </div>
+                <img class="lab-preview-image" src="../preview-snaps/wgmmavisu.png" alt="WGMMA 生命周期可视化预览" loading="lazy">
+              </div>
+            </article>
+
+            <article class="lab-item" data-reveal>
+              <div class="lab-copy">
+                <p class="lab-index">05</p>
+                <h3>TMA / WGMMA Async Pipeline</h3>
+                <p>
+                  一个紧凑的缓冲区+时间线视图，展示异步流水线中重叠（overlap）的加载、计算、存储
+                  与 barrier 驱动的推进。
+                </p>
+                <a class="button button-secondary" href="https://cudacourseh100.github.io/simplebarrier/" target="_blank" rel="noreferrer">
+                  打开 Barrier 可视化
+                </a>
+              </div>
+              <div class="lab-preview-shell">
+                <div class="lab-preview-meta">
+                  <span>快照</span>
+                  <span>异步流水线</span>
+                </div>
+                <img class="lab-preview-image" src="../preview-snaps/simplebarrier.png" alt="TMA 与 WGMMA 异步流水线可视化预览" loading="lazy">
+              </div>
+            </article>
+
+            <article class="lab-item" data-reveal>
+              <div class="lab-copy">
+                <p class="lab-index">06</p>
+                <h3>Thread Block Cluster Visualizer</h3>
+                <p>
+                  线程块集群的交互式视图：驻留、分布式共享内存拓扑，
+                  以及集群如何在 Hopper 上跨 SM 协同。
+                </p>
+                <a class="button button-secondary" href="https://cudacourseh100.github.io/cluster/" target="_blank" rel="noreferrer">
+                  打开集群可视化
+                </a>
+              </div>
+              <div class="lab-preview-shell">
+                <div class="lab-preview-meta">
+                  <span>快照</span>
+                  <span>集群拓扑</span>
+                </div>
+                <img class="lab-preview-image" src="../preview-snaps/cluster.png" alt="线程块集群可视化预览" loading="lazy">
+              </div>
+            </article>
+
+            <article class="lab-item" data-reveal>
+              <div class="lab-copy">
+                <p class="lab-index">07</p>
+                <h3>SM90 Tile Scheduler Visualizer</h3>
+                <p>
+                  CUTLASS SM90 tile 调度的实时演示：swizzle group、cluster-major 与 cluster-minor
+                  偏移、光栅顺序，以及从线性 CTA 工作到输出 tile 的
+                  <code>get_work_idx_m_and_n</code> 映射。
+                </p>
+                <a class="button button-secondary" href="https://cudacourseh100.github.io/tile-scheduler-viz/" target="_blank" rel="noreferrer">
+                  打开 tile 调度器可视化
+                </a>
+              </div>
+              <div class="lab-preview-shell">
+                <div class="lab-preview-meta">
+                  <span>快照</span>
+                  <span>调度器映射</span>
+                </div>
+                <img class="lab-preview-image" src="../preview-snaps/tile-scheduler-viz.png" alt="SM90 tile 调度器可视化预览" loading="lazy">
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="statement faq-section" id="faq" data-reveal>
+        <div class="section-shell">
+          <div class="section-head">
+            <p class="section-kicker">常见问题</p>
+            <h2>开始之前，人们通常想知道的事。</h2>
+            <p>
+              关于先修要求、课程范围，以及这门课真正想教什么的简短回答。
+            </p>
+          </div>
+
+          <div class="faq-list">
+            <article class="faq-item" data-faq-item data-reveal>
+              <h3 class="faq-heading">
+                <button class="faq-trigger" type="button" id="faq-trigger-1" aria-expanded="true" aria-controls="faq-panel-1">
+                  <span class="faq-index">Q1</span>
+                  <span class="faq-question">这是一门 CUDA 入门课吗？</span>
+                  <span class="faq-icon" aria-hidden="true"></span>
+                </button>
+              </h3>
+              <div class="faq-panel" id="faq-panel-1" role="region" aria-labelledby="faq-trigger-1">
+                <p>
+                  课程从<a href="../pages/zh/lesson-1.html">第 1 课</a>开始，但默认你已经能熟练使用 C 或
+                  C++，并且能读懂常规的 CUDA 内核。这里的重点是 Hopper 的执行模型，而不是 CUDA 基础。
+                </p>
+              </div>
+            </article>
+
+            <article class="faq-item" data-faq-item data-reveal>
+              <h3 class="faq-heading">
+                <button class="faq-trigger" type="button" id="faq-trigger-2" aria-expanded="false" aria-controls="faq-panel-2">
+                  <span class="faq-index">Q2</span>
+                  <span class="faq-question">这门课到底教什么？</span>
+                  <span class="faq-icon" aria-hidden="true"></span>
+                </button>
+              </h3>
+              <div class="faq-panel" id="faq-panel-2" role="region" aria-labelledby="faq-trigger-2" hidden>
+                <p>
+                  它直接讲授 Hopper 机制：异步执行、<code>mbarrier</code>、集群、分布式共享内存、
+                  <code>CUtensorMap</code>、<code>cp.async.bulk</code>、WGMMA、warp 专用化内核设计，
+                  以及真实训练系统中出现的多 GPU 技术栈。
+                </p>
+              </div>
+            </article>
+
+            <article class="faq-item" data-faq-item data-reveal>
+              <h3 class="faq-heading">
+                <button class="faq-trigger" type="button" id="faq-trigger-3" aria-expanded="false" aria-controls="faq-panel-3">
+                  <span class="faq-index">Q3</span>
+                  <span class="faq-question">它深入覆盖 TMA 和 WGMMA 吗？</span>
+                  <span class="faq-icon" aria-hidden="true"></span>
+                </button>
+              </h3>
+              <div class="faq-panel" id="faq-panel-3" role="region" aria-labelledby="faq-trigger-3" hidden>
+                <p>
+                  是的。<a href="../pages/zh/lesson-4.html">第 4 课</a>和<a href="../pages/zh/lesson-5.html">第 5 课</a>
+                  覆盖 cuTensorMap、TMA 与 <code>cp.async.bulk</code>。<a href="../pages/zh/lesson-6.html">第 6 课</a>
+                  和<a href="../pages/zh/lesson-7.html">第 7 课</a>覆盖 WGMMA 发射、等待逻辑、描述符、
+                  <code>stmatrix</code>、FP8 与稀疏行为。
+                </p>
+              </div>
+            </article>
+
+            <article class="faq-item" data-faq-item data-reveal>
+              <h3 class="faq-heading">
+                <button class="faq-trigger" type="button" id="faq-trigger-4" aria-expanded="false" aria-controls="faq-panel-4">
+                  <span class="faq-index">Q4</span>
+                  <span class="faq-question">课程包含多 GPU 主题吗？</span>
+                  <span class="faq-icon" aria-hidden="true"></span>
+                </button>
+              </h3>
+              <div class="faq-panel" id="faq-panel-4" role="region" aria-labelledby="faq-trigger-4" hidden>
+                <p>
+                  包含。<a href="../pages/zh/lesson-9.html">第 9 课</a>和<a href="../pages/zh/lesson-10.html">第 10 课</a>
+                  覆盖 NVLink、NVSwitch、拓扑、Slurm、PMIx、NCCL 通信器、集合通信
+                  与分布式训练模式。
+                </p>
+              </div>
+            </article>
+
+            <article class="faq-item" data-faq-item data-reveal>
+              <h3 class="faq-heading">
+                <button class="faq-trigger" type="button" id="faq-trigger-5" aria-expanded="false" aria-controls="faq-panel-5">
+                  <span class="faq-index">Q5</span>
+                  <span class="faq-question">为什么 H100 不同于旧的 CUDA 心智模型？</span>
+                  <span class="faq-icon" aria-hidden="true"></span>
+                </button>
+              </h3>
+              <div class="faq-panel" id="faq-panel-5" role="region" aria-labelledby="faq-trigger-5" hidden>
+                <p>
+                  因为 Hopper 围绕“重叠优先”的执行方式构建。请求和完成不再是同一个心智事件，
+                  课程会通过屏障、描述符支撑的数据搬运、共享内存暂存与 warpgroup 张量核心发射
+                  不断回到这一点。
+                </p>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="closing" data-reveal>
+        <div class="section-shell closing-shell">
+          <p class="section-kicker section-kicker-dark">从这里开始</p>
+          <h2>从 Hopper 架构出发，进入让现代内核真正跑起来的机制。</h2>
+          <p>
+            这些课程把执行模型、描述符、等待、tile 调度、张量核心数据流
+            与多 GPU 编排连接成一体。
+          </p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="../pages/zh/lesson-1.html">
+              从第 1 课开始
+            </a>
+            <a class="button button-secondary" href="slides.html">
+              浏览全部幻灯片
+            </a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <nav class="footer-nav" aria-label="页脚">
+        <a href="#top">首页</a>
+        <a href="#lessons">课程</a>
+        <a href="#faq">常见问题</a>
+        <a href="#explore">深度解读</a>
+        <a href="#pipelines">流水线</a>
+        <a href="#visuals">可视化</a>
+        <a href="#code">代码</a>
+        <a href="slides.html">幻灯片</a>
+      </nav>
+      <p>CUDA Programming for NVIDIA H100s</p>
+      <p>Prateek Shukla</p>
+    </footer>
+
+    <script src="../script.js"></script>
+  </body>
+</html>

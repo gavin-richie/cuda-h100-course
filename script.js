@@ -668,9 +668,22 @@ function initSidebarScrollSpy() {
   }, { passive: true });
 }
 
+function initLanguageSelect() {
+  const selects = document.querySelectorAll("[data-lang-select] select");
+
+  for (const select of selects) {
+    select.addEventListener("change", () => {
+      if (select.value) {
+        window.location.assign(select.value);
+      }
+    });
+  }
+}
+
 initMobileNav();
 initLessonVideoEmbeds();
 initRevealAnimations();
 initPipelineShowcase();
 initFaqAccordions();
 initSidebarScrollSpy();
+initLanguageSelect();

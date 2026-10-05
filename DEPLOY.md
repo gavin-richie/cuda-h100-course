@@ -4,7 +4,12 @@
 
 - 英文版：`https://cudacourseh100.github.io/pages/lesson-1.html`
 - 中文版：`https://cudacourseh100.github.io/pages/zh/lesson-1.html`
-- 每个课程页导航栏右侧有 `中文` / `English` 切换链接，两种语言页面之间一一对应。
+- 中文主页：`https://cudacourseh100.github.io/zh/`（英文主页右上角语言下拉框切换）
+- 中文幻灯片页：`https://cudacourseh100.github.io/zh/slides.html`（链接中文 PDF 讲义与中文课程页）
+- 中文 PDF 讲义：`https://cudacourseh100.github.io/H100-Course/slides-zh/1. Introduction to H100.pdf` 等 12 份，
+  由 `python3 scripts/build-zh-slides.py` 从 `markdown/lessons_zh/` 重新生成（需要 `.fonts/NotoSansSC.ttf`，
+  缺失时脚本会自动下载）。
+- 每个课程页导航栏右侧有 `Simplified Chinese` / `English` 切换按钮；主页与幻灯片页使用语言下拉框。
 
 ## 部署架构
 
